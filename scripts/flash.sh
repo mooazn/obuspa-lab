@@ -104,7 +104,9 @@ docker build \
 [ -f "$CARD/obuspa" ] && chmod +x "$CARD/obuspa"
 
 # --- manifest -----------------------------------------------------------------------
-size_of() { stat -f %z "$1" 2>/dev/null || stat -c %s "$1"; }
+# `stat -f %z` is file size on macOS but *filesystem* status on GNU/Linux,
+# where it succeeds with a multi-line dump; wc is the same everywhere.
+size_of() { wc -c < "$1" | tr -d ' '; }
 
 PLUGIN_JSON="[]"
 if [ -d "$CARD/plugins" ] && ls "$CARD/plugins"/*.so >/dev/null 2>&1; then
