@@ -1,5 +1,7 @@
 # obuspa-lab
 
+![Lab Setup](<LabInitImg.png>)
+
 A virtual CPE for TR-369 / USP development. A real, unmodified
 [OB-USP-AGENT](https://github.com/BroadbandForum/obuspa) runs against
 simulated hardware you can see and handle in the browser — so developing and
