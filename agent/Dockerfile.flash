@@ -1,0 +1,43 @@
+# Builds an SD card image: an obuspa binary from an arbitrary source tree
+# and/or vendor plug-ins, compiled against the tree the card will boot.
+#
+# Used by scripts/flash.sh, never by compose. Sources come in as named build
+# contexts and the result is exported straight to ./sdcard with
+# `docker build --output`, so nothing is tagged or left behind.
+#
+#   --target card           obuspa + proxy plug-in + vendor plug-ins  (needs obuspa-src)
+#   --target card-plugins   vendor plug-ins only, against the built-in tree
+
+# The agent's build stage already has every dependency compiled and installed,
+# and the built-in obuspa tree checked out at /usr/local/src/obuspa
+FROM obuspa_sim-buildenv AS flash-build
+
+COPY --from=obuspa-src / /usr/local/src/obuspa-flash/
+RUN cd /usr/local/src/obuspa-flash \
+    && autoreconf --force --install \
+    && ./configure \
+    && make -j"$(nproc)"
+
+# The proxy plug-in against *its* headers, in case the vendor API moved
+COPY plugin/ /usr/local/src/vdev-plugin-flash/
+RUN make -C /usr/local/src/vdev-plugin-flash OBUSPA_SRC=/usr/local/src/obuspa-flash
+
+# Vendor plug-ins against the flashed tree
+FROM flash-build AS plugins-flashed
+COPY --from=plugins / /usr/local/src/vendor-plugins/
+RUN sh /usr/local/src/vdev-plugin-flash/build-plugins.sh /usr/local/src/obuspa-flash /out/plugins
+
+# Vendor plug-ins against the built-in tree (a plug-ins-only card)
+FROM obuspa_sim-buildenv AS plugins-builtin
+COPY plugin/ /usr/local/src/vdev-plugin-flash/
+COPY --from=plugins / /usr/local/src/vendor-plugins/
+RUN sh /usr/local/src/vdev-plugin-flash/build-plugins.sh /usr/local/src/obuspa /out/plugins
+
+# Only the artefacts leave
+FROM scratch AS card
+COPY --from=flash-build /usr/local/src/obuspa-flash/obuspa /obuspa
+COPY --from=flash-build /usr/local/src/vdev-plugin-flash/vdev_plugin.so /vdev_plugin.so
+COPY --from=plugins-flashed /out/ /
+
+FROM scratch AS card-plugins
+COPY --from=plugins-builtin /out/ /

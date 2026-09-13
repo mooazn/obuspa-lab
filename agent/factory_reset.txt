@@ -1,0 +1,53 @@
+# Factory reset database for the simulated CPE.
+#
+# Adapted from obuspa's mqtt_factory_reset_example.txt. Two topics matter:
+#   /usp/agent      - the agent subscribes here; the controller publishes here
+#   /usp/controller - the agent publishes here; the controller subscribes here
+#
+# NOTE: obuspa only applies these values when no database exists yet. The
+# compose stack keeps the database on a tmpfs-like volume that is recreated on
+# `docker compose down -v`, so edits here take effect after a `down -v`.
+
+# Identity. Set explicitly rather than deriving from the MAC address, so that
+# the endpoint ID is stable across container recreation.
+Device.LocalAgent.EndpointID "os::vdev-001"
+
+# --- MQTT client ------------------------------------------------------------
+Device.MQTT.Client.1.Alias "cpe-1"
+Device.MQTT.Client.1.Enable true
+Device.MQTT.Client.1.BrokerAddress "mosquitto"
+Device.MQTT.Client.1.BrokerPort "1883"
+Device.MQTT.Client.1.TransportProtocol "TCP/IP"
+Device.MQTT.Client.1.ProtocolVersion "5.0"
+Device.MQTT.Client.1.ClientID "vdev-001"
+Device.MQTT.Client.1.Username ""
+Device.MQTT.Client.1.Password ""
+Device.MQTT.Client.1.KeepAliveTime "60"
+Device.MQTT.Client.1.ConnectRetryTime "5"
+Device.MQTT.Client.1.ConnectRetryIntervalMultiplier "2000"
+Device.MQTT.Client.1.ConnectRetryMaxInterval "30720"
+
+# --- Agent MTP: where the agent listens -------------------------------------
+Device.LocalAgent.MTP.1.Alias "cpe-1"
+Device.LocalAgent.MTP.1.Enable true
+Device.LocalAgent.MTP.1.Protocol "MQTT"
+Device.LocalAgent.MTP.1.MQTT.Reference "Device.MQTT.Client.1"
+Device.LocalAgent.MTP.1.MQTT.ResponseTopicConfigured "/usp/agent"
+
+# --- The controller the agent will talk to ----------------------------------
+Device.LocalAgent.Controller.1.Alias "cpe-1"
+Device.LocalAgent.Controller.1.Enable true
+Device.LocalAgent.Controller.1.EndpointID "self::usp-controller"
+Device.LocalAgent.Controller.1.AssignedRole "Device.LocalAgent.ControllerTrust.Role.1"
+Device.LocalAgent.Controller.1.PeriodicNotifInterval "86400"
+Device.LocalAgent.Controller.1.PeriodicNotifTime "0001-01-01T00:00:00Z"
+Device.LocalAgent.Controller.1.USPNotifRetryMinimumWaitInterval "5"
+Device.LocalAgent.Controller.1.USPNotifRetryIntervalMultiplier "2000"
+Device.LocalAgent.Controller.1.ControllerCode ""
+Device.LocalAgent.Controller.1.MTP.1.Alias "cpe-1"
+Device.LocalAgent.Controller.1.MTP.1.Enable true
+Device.LocalAgent.Controller.1.MTP.1.Protocol "MQTT"
+Device.LocalAgent.Controller.1.MTP.1.MQTT.Reference "Device.MQTT.Client.1"
+Device.LocalAgent.Controller.1.MTP.1.MQTT.Topic "/usp/controller"
+
+Internal.Reboot.Cause "LocalFactoryReset"

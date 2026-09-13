@@ -1,0 +1,5 @@
+paho-mqtt==2.1.0
+protobuf==5.29.3
+grpcio-tools==1.69.0
+pytest==8.3.4
+requests==2.32.3

@@ -1,0 +1,43 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build images (obuspa compiles from source here)
+        run: docker compose build
+
+      - name: Start the stack
+        run: |
+          docker compose up -d
+          # the agent connects only once the device serves its data model
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/api/state | grep -q '"eventsConnected": *true'; then
+              echo "agent connected"; exit 0
+            fi
+            sleep 2
+          done
+          echo "agent never connected"; docker compose logs; exit 1
+
+      - name: Controller venv + protobuf bindings
+        run: make venv
+
+      - name: Run the suite
+        run: .venv/bin/pytest tests/ -v --durations=10
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -400

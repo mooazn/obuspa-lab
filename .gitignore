@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+# generated protobuf bindings (scripts/gen_proto.sh; device image builds its own)
+controller/uspctl/proto/*_pb2.py
+device/vdev/usp_proto/*_pb2.py
+
+# build artefacts
+*.so
+*.db
+
+# the SD card holds flashed builds, never source
+sdcard/obuspa
+sdcard/vdev_plugin.so
+sdcard/manifest.json
+sdcard/plugins/
+
+# kept locally, not published
+docs/history.md

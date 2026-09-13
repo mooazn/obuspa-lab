@@ -1,0 +1,72 @@
+.PHONY: help venv proto build up down logs test clean reset flash eject
+
+PYTHON ?= python3
+VENV   := .venv
+PIP    := $(VENV)/bin/pip
+PY     := $(VENV)/bin/python
+
+help:
+	@echo "make venv    - create the local venv and generate USP protobuf bindings"
+	@echo "make up      - build images if needed and start the stack"
+	@echo "make test    - run the test suite against a running stack"
+	@echo "make logs    - follow logs from all services"
+	@echo "make down    - stop the stack (keeps agent database)"
+	@echo "make reset   - stop the stack and factory reset the agent database"
+	@echo "make flash SRC=~/obuspa      - build that obuspa tree onto the SD card"
+	@echo "make flash REF=v10.0.0-master - build an upstream ref onto the SD card"
+	@echo "make flash PLUGINS=\"examples/disk-monitor\" - your plug-in(s), against the built-in obuspa"
+	@echo "                               (combine with SRC/REF to build them against that tree)"
+	@echo "make eject   - wipe the SD card"
+	@echo
+	@echo "Bringing your own code: docs/vendor-integration.md"
+
+$(VENV)/bin/activate: controller/requirements.txt
+	$(PYTHON) -m venv $(VENV)
+	$(PIP) install --quiet --upgrade pip
+	$(PIP) install --quiet -r controller/requirements.txt
+	@touch $(VENV)/bin/activate
+
+venv: $(VENV)/bin/activate proto
+
+proto: $(VENV)/bin/activate
+	@PYTHON=$(PY) ./scripts/gen_proto.sh
+
+build:
+	docker compose build
+
+up:
+	docker compose up -d --build
+	@echo
+	@echo "web UI:  http://localhost:8080"
+	@echo "broker:  localhost:1883"
+	@echo "watch:   make logs"
+
+down:
+	docker compose down
+
+reset:
+	docker compose down -v
+
+logs:
+	docker compose logs -f
+
+test: venv
+	$(VENV)/bin/pytest tests/ -v
+
+clean:
+	rm -rf $(VENV) controller/uspctl/proto/*_pb2.py
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+
+# "Flash" an obuspa build onto the SD card. Either a local tree you have
+# edited (SRC) or an upstream git ref (REF). LABEL names it in the UI.
+FLASH_ARGS := $(if $(SRC),--src "$(SRC)") $(if $(REF),--ref "$(REF)") \
+              $(foreach p,$(PLUGINS),--plugin "$(p)") $(if $(LABEL),--label "$(LABEL)")
+
+flash:
+	@if [ -z "$(SRC)$(REF)$(PLUGINS)" ]; then \
+	  echo "usage: make flash [SRC=<obuspa checkout> | REF=<git ref>] [PLUGINS=\"dir ...\"] [LABEL=name]"; exit 2; fi
+	./scripts/flash.sh $(FLASH_ARGS)
+
+eject:
+	rm -rf sdcard/obuspa sdcard/vdev_plugin.so sdcard/manifest.json sdcard/plugins
+	@echo "SD card wiped"
