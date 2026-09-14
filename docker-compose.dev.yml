@@ -1,0 +1,18 @@
+# Override that builds the agent and device images from this tree instead of
+# pulling them. Applied on top of docker-compose.yml; all other service
+# configuration comes from the base file.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+services:
+  device:
+    build:
+      context: .
+      dockerfile: device/Dockerfile
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+      args:
+        OBUSPA_VERSION: ${OBUSPA_VERSION:-v11.0.0-master}

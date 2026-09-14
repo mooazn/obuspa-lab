@@ -1,8 +1,13 @@
 # One simulated CPE: a real OB-USP-AGENT talking MQTT to a real broker, with
 # its TR-181 data model served by the Python virtual device.
 #
-#   docker compose up --build
-#   open http://localhost:8080
+# Images are pulled from GHCR by default. docker-compose.dev.yml overrides
+# them with local builds for work on the agent, plug-in, or device sources:
+#
+#   docker compose up -d                                                    # prebuilt images
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build   # from source
+#
+# VDEV_IMAGE_PREFIX and VDEV_IMAGE_TAG select a different registry or tag.
 #
 # The agent and the device share /run/vdev so the plug-in can reach the device's
 # Unix socket. That volume also holds the agent's sqlite database, so
@@ -23,9 +28,7 @@ services:
       retries: 10
 
   device:
-    build:
-      context: .
-      dockerfile: device/Dockerfile
+    image: ${VDEV_IMAGE_PREFIX:-ghcr.io/mooazn/obuspa-lab}/device:${VDEV_IMAGE_TAG:-latest}
     container_name: vdev-device
     networks:
       default:
@@ -56,11 +59,7 @@ services:
       retries: 20
 
   agent:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
-      args:
-        OBUSPA_VERSION: v11.0.0-master
+    image: ${VDEV_IMAGE_PREFIX:-ghcr.io/mooazn/obuspa-lab}/agent:${VDEV_IMAGE_TAG:-latest}
     container_name: vdev-agent
     init: true
     # Device.Reboot() makes obuspa exit. Restarting it here is what turns that

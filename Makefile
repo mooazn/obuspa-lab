@@ -1,4 +1,4 @@
-.PHONY: help venv proto build up down logs test clean reset flash eject
+.PHONY: help venv proto build up dev down logs test clean reset flash eject
 
 PYTHON ?= python3
 VENV   := .venv
@@ -7,7 +7,8 @@ PY     := $(VENV)/bin/python
 
 help:
 	@echo "make venv    - create the local venv and generate USP protobuf bindings"
-	@echo "make up      - build images if needed and start the stack"
+	@echo "make up      - pull the prebuilt images and start the stack (seconds)"
+	@echo "make dev     - build the images from this tree and start the stack (minutes)"
 	@echo "make test    - run the test suite against a running stack"
 	@echo "make logs    - follow logs from all services"
 	@echo "make down    - stop the stack (keeps agent database)"
@@ -31,15 +32,27 @@ venv: $(VENV)/bin/activate proto
 proto: $(VENV)/bin/activate
 	@PYTHON=$(PY) ./scripts/gen_proto.sh
 
-build:
-	docker compose build
+# `up` pulls the published images; `dev` builds them from this tree. Both use
+# the same compose project, so down/logs/reset apply to either.
+COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
 up:
-	docker compose up -d --build
+	@docker compose pull --quiet || { \
+	  echo; echo "could not pull the prebuilt images (not published yet, or private?)"; \
+	  echo "build them from this tree instead:  make dev"; exit 1; }
+	docker compose up -d
 	@echo
 	@echo "web UI:  http://localhost:8080"
 	@echo "broker:  localhost:1883"
-	@echo "watch:   make logs"
+	@echo "watch:   make logs      (editing the source? use: make dev)"
+
+dev:
+	$(COMPOSE_DEV) up -d --build
+	@echo
+	@echo "web UI:  http://localhost:8080   (built from this tree)"
+
+build:
+	$(COMPOSE_DEV) build
 
 down:
 	docker compose down

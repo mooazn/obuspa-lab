@@ -57,10 +57,15 @@ Requires Docker (Docker Desktop or Engine; on macOS, Docker Desktop or
 colima) and Python 3.11+ for the tests.
 
 ```bash
-make up      # build and start broker + agent + device (first build ~5 min: obuspa compiles)
+make up      # pull the prebuilt images and start broker + agent + device
 make test    # run the suite against it
 make logs    # follow all three services
 ```
+
+`make up` pulls images published from this repository (`ghcr.io/mooazn/obuspa-lab/{agent,device}`,
+amd64 and arm64). To build them from the working tree instead — after
+changing the plug-in, the device, or the agent's entrypoint — use `make dev`;
+the first build compiles obuspa from source and takes a few minutes.
 
 Open <http://localhost:8080>. Drag to orbit the device; change the SSID in
 the tree and read it back over USP; press reset and watch it boot.

@@ -17,12 +17,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build images (obuspa compiles from source here)
-        run: docker compose build
+      - name: Build images from this tree (obuspa compiles from source here)
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
       - name: Start the stack
         run: |
-          docker compose up -d
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
           # the agent connects only once the device serves its data model
           for i in $(seq 1 60); do
             if curl -sf http://localhost:8080/api/state | grep -q '"eventsConnected": *true'; then
