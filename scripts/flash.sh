@@ -69,7 +69,9 @@ fi
 PLUG_STAGE="$TMP/plugins"
 mkdir -p "$PLUG_STAGE"
 PLUGIN_NAMES=()
-for dir in "${PLUGINS[@]}"; do
+# ${arr[@]+"${arr[@]}"} expands to nothing for an empty array without tripping
+# `set -u` on bash 3.2 (macOS); plain "${arr[@]}" does.
+for dir in ${PLUGINS[@]+"${PLUGINS[@]}"}; do
     dir="${dir/#\~/$HOME}"
     [ -d "$dir" ] || { echo "flash: plug-in dir not found: $dir" >&2; exit 1; }
     name="$(basename "$(cd "$dir" && pwd)")"
