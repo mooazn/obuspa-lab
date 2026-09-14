@@ -46,6 +46,7 @@ async def main() -> None:
     # The agent container's console, written to the shared run volume
     console = ConsoleTail(os.environ.get("VDEV_AGENT_LOG", "/run/vdev/agent.log"))
     console.start()
+    device.set_boot_probe(lambda: console.boots_within(300))
 
     # The WAN port: the agent reaches its broker through this relay, so link
     # faults and latency are real to it. Fault acks from the agent container

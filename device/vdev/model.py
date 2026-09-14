@@ -187,13 +187,68 @@ def _interface_status(values, device, instances) -> str:
     return "Up" if values.get("Enable") else "Down"
 
 
+FIREWALL_TARGETS = ("Accept", "Drop", "Reject")
+
+
+def _validate_target(value: str) -> None:
+    if value not in FIREWALL_TARGETS:
+        raise ValueError(f"Target must be one of {', '.join(FIREWALL_TARGETS)}")
+
+
+def _validate_port(value: int) -> None:
+    if not -1 <= value <= 65535:
+        raise ValueError("port must be -1 (any) or 0..65535")
+
+
+def _blocked_by_firewall(device, mac: str = "", ip: str = "") -> bool:
+    """Whether an enabled Drop/Reject rule in an enabled chain matches a host.
+
+    A rule matches on whichever of SourceMAC / SourceIP it specifies; an
+    empty field is a wildcard. This is the cause-to-effect link firmware
+    relies on: it writes the rule, the device derives the consequence.
+    """
+    mac = (mac or "").lower()
+    for chain in device.child_instances("Device.Firewall.Chain.{i}", ()):
+        if not device.safe_get(f"Device.Firewall.Chain.{chain}.Enable"):
+            continue
+        for rule in device.child_instances("Device.Firewall.Chain.{i}.Rule.{i}", (chain,)):
+            prefix = f"Device.Firewall.Chain.{chain}.Rule.{rule}"
+            if not device.safe_get(f"{prefix}.Enable"):
+                continue
+            if device.safe_get(f"{prefix}.Target") not in ("Drop", "Reject"):
+                continue
+            rule_mac = (device.safe_get(f"{prefix}.SourceMAC") or "").lower()
+            rule_ip = device.safe_get(f"{prefix}.SourceIP") or ""
+            if not rule_mac and not rule_ip:
+                continue                    # a rule that names no source matches nothing here
+            if rule_mac and rule_mac != mac:
+                continue
+            if rule_ip and rule_ip != ip:
+                continue
+            return True
+    return False
+
+
 def _host_active(values, device, instances) -> bool:
-    """A host stops being active when the interface it arrived on goes away."""
+    """A host is active unless its interface is down or the firewall drops it."""
     layer1 = values.get("Layer1Interface") or ""
-    if not layer1:
-        return bool(values.get("Active"))
-    status = device.safe_get(f"{layer1}.Status")
-    return status in ("Up", "Enabled")
+    if layer1 and device.safe_get(f"{layer1}.Status") not in ("Up", "Enabled"):
+        return False
+    return not _blocked_by_firewall(device, values.get("PhysAddress", ""),
+                                    values.get("IPAddress", ""))
+
+
+def _client_active(values, device, instances) -> bool:
+    """An associated client is active unless the firewall drops its MAC."""
+    return not _blocked_by_firewall(device, values.get("MACAddress", ""))
+
+
+def _rule_status(values, device, instances) -> str:
+    return "Enabled" if values.get("Enable") else "Disabled"
+
+
+def _rule_count(values, device, instances) -> int:
+    return len(device.child_instances("Device.Firewall.Chain.{i}.Rule.{i}", instances))
 
 
 # ----------------------------------------------------------------------
@@ -324,7 +379,7 @@ MODEL: list[ObjectDef] = [
                      persistent=False),
             ParamDef("LastDataUplinkRate", TYPE_UINT, default=650000,
                      persistent=False),
-            ParamDef("Active", TYPE_BOOL, default=True, persistent=False),
+            ParamDef("Active", TYPE_BOOL, derived=_client_active),
         ],
     ),
 
@@ -338,6 +393,37 @@ MODEL: list[ObjectDef] = [
             ParamDef("InterfaceType", default="802.11", persistent=False),
             ParamDef("Layer1Interface", default="", persistent=False),
             ParamDef("Active", TYPE_BOOL, default=True, derived=_host_active),
+        ],
+    ),
+
+    # -- Firewall -----------------------------------------------------
+    # The subset of TR-181 Device.Firewall that gives a rule an effect: a
+    # Drop/Reject rule naming a client's MAC or IP makes that client inactive
+    # in Hosts and AssociatedDevice. Vendor logic acts on the hardware by
+    # writing rules here through obuspa's data model API.
+    ObjectDef(
+        path="Device.Firewall.Chain.{i}",
+        params=[
+            ParamDef("Enable", TYPE_BOOL, writable=True, default=True),
+            ParamDef("Name", default="LAN"),
+            ParamDef("RuleNumberOfEntries", TYPE_UINT, derived=_rule_count),
+        ],
+    ),
+    ObjectDef(
+        path="Device.Firewall.Chain.{i}.Rule.{i}",
+        writable=True,
+        params=[
+            ParamDef("Enable", TYPE_BOOL, writable=True, default=True),
+            ParamDef("Status", derived=_rule_status),
+            ParamDef("Order", TYPE_UINT, writable=True, default=1),
+            ParamDef("Description", writable=True, default=""),
+            ParamDef("Target", writable=True, default="Drop", validate=_validate_target),
+            ParamDef("Protocol", TYPE_INT, writable=True, default=-1),
+            ParamDef("SourceMAC", writable=True, default=""),
+            ParamDef("SourceIP", writable=True, default=""),
+            ParamDef("DestIP", writable=True, default=""),
+            ParamDef("DestPort", TYPE_INT, writable=True, default=-1,
+                     validate=_validate_port),
         ],
     ),
 
@@ -410,6 +496,9 @@ FACTORY_INSTANCES: dict[str, list[tuple[tuple[int, ...], dict[str, Any]]]] = {
         ((1,), {"SSIDReference": "Device.WiFi.SSID.1"}),
         ((2,), {"SSIDReference": "Device.WiFi.SSID.2"}),
     ],
+    "Device.Firewall.Chain.{i}": [
+        ((1,), {"Name": "LAN", "Enable": True}),
+    ],
     "Device.Cellular.Interface.{i}": [
         ((1,), {"Name": "wwan0", "IMEI": "356938035643809"}),
     ],
@@ -442,7 +531,6 @@ def attach_client(device, access_point: int, mac: str, hostname: str,
         {
             f"{ap_path}.AssociatedDevice.{instance}.MACAddress": mac,
             f"{ap_path}.AssociatedDevice.{instance}.SignalStrength": signal,
-            f"{ap_path}.AssociatedDevice.{instance}.Active": True,
         },
         internal=True,
     )

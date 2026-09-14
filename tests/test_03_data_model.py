@@ -83,15 +83,14 @@ def test_clients_are_counted_per_access_point(controller, attach_client_api):
     assert controller.get_one(f"{AP2}.AssociatedDeviceNumberOfEntries") == "0"
 
 
-def test_client_is_visible_in_both_subtrees(controller, attach_client_api):
+def test_client_is_visible_in_both_subtrees(controller, attach_client_api, usp_visible):
     """A client shows up as an AssociatedDevice and as a Host, like real kit."""
     mac = "02:00:5e:aa:00:07"
     instance = attach_client_api(1, mac=mac, hostname="tablet")
 
-    assert controller.get_one(f"{AP1}.AssociatedDevice.{instance}.MACAddress") == mac
-
-    hosts = controller.get("Device.Hosts.")
-    assert mac in hosts.values(), "the client should also appear in Device.Hosts"
+    values = usp_visible(f"{AP1}.AssociatedDevice.{instance}.")
+    assert values[f"{AP1}.AssociatedDevice.{instance}.MACAddress"] == mac
+    assert usp_visible.host_for(mac), "the client should also appear in Device.Hosts"
 
 
 # ----------------------------------------------------------------------
@@ -184,3 +183,110 @@ def test_client_arrival_is_pushed_as_object_creation(controller, attach_client_a
         timeout=20,
     )
     assert notification["obj_path"].startswith(f"{AP1}.AssociatedDevice.")
+
+
+# ----------------------------------------------------------------------
+# Firewall: a rule is a cause, a client going inactive is the effect
+# ----------------------------------------------------------------------
+
+CHAIN = "Device.Firewall.Chain.1"
+
+
+@pytest.fixture
+def firewall_rule(controller):
+    """Creates rules through the controller and deletes them afterwards."""
+    created: list[str] = []
+
+    def _add(**params) -> str:
+        path = controller.add(f"{CHAIN}.Rule.", params)
+        created.append(path.rstrip("."))
+        return path.rstrip(".")
+
+    yield _add
+    for path in created:
+        try:
+            controller.delete(path)
+        except UspError:
+            pass
+
+
+def test_firewall_chain_exists_with_no_rules(controller):
+    assert controller.get_one(f"{CHAIN}.Enable") == "true"
+    assert controller.get_one(f"{CHAIN}.RuleNumberOfEntries") == "0"
+
+
+def test_drop_rule_by_mac_makes_the_client_inactive(controller, attach_client_api,
+                                                     firewall_rule, usp_visible):
+    """The reference case for "causes, not effects".
+
+    Nothing may write Hosts.Host.Active or AssociatedDevice.Active directly -
+    obuspa refuses, for firmware and controllers alike. Writing a firewall
+    rule is how something is taken off the network, and the device derives
+    the rest.
+    """
+    mac = "02:00:5e:fw:00:01".replace("fw", "f0")
+    client = attach_client_api(1, mac=mac, hostname="blocked-one")
+    client_path = f"{AP1}.AssociatedDevice.{client}"
+    usp_visible(client_path + ".")
+    host_path = usp_visible.host_for(mac)
+
+    assert controller.get_one(f"{client_path}.Active") == "true"
+    assert controller.get_one(f"{host_path}.Active") == "true"
+
+    rule = firewall_rule(Target="Drop", SourceMAC=mac.upper(), Description="parental")
+
+    assert controller.get_one(f"{CHAIN}.RuleNumberOfEntries") == "1"
+    assert controller.get_one(f"{rule}.Status") == "Enabled"
+    assert controller.get_one(f"{client_path}.Active") == "false"
+    assert controller.get_one(f"{host_path}.Active") == "false"
+
+    controller.set({f"{rule}.Enable": False})
+    assert controller.get_one(f"{client_path}.Active") == "true"
+
+
+def test_accept_rule_has_no_effect(controller, usp_visible, attach_client_api, firewall_rule):
+    mac = "02:00:5e:f0:00:02"
+    client = attach_client_api(1, mac=mac, hostname="allowed")
+    usp_visible(f"{AP1}.AssociatedDevice.{client}.")
+    firewall_rule(Target="Accept", SourceMAC=mac)
+    assert controller.get_one(f"{AP1}.AssociatedDevice.{client}.Active") == "true"
+
+
+def test_rule_by_ip_blocks_the_host(controller, attach_client_api, firewall_rule, usp_visible):
+    mac = "02:00:5e:f0:00:03"
+    attach_client_api(1, mac=mac, hostname="by-ip", ip="192.168.1.77")
+    host_path = usp_visible.host_for(mac)
+
+    firewall_rule(Target="Reject", SourceIP="192.168.1.77")
+    assert controller.get_one(f"{host_path}.Active") == "false"
+
+
+def test_disabling_the_chain_lifts_every_rule(controller, usp_visible, attach_client_api, firewall_rule):
+    mac = "02:00:5e:f0:00:04"
+    client = attach_client_api(1, mac=mac, hostname="chain")
+    usp_visible(f"{AP1}.AssociatedDevice.{client}.")
+    firewall_rule(Target="Drop", SourceMAC=mac)
+    path = f"{AP1}.AssociatedDevice.{client}.Active"
+    assert controller.get_one(path) == "false"
+
+    controller.set({f"{CHAIN}.Enable": False})
+    try:
+        assert controller.get_one(path) == "true"
+    finally:
+        controller.set({f"{CHAIN}.Enable": True})
+
+
+def test_firewall_validation(controller, firewall_rule):
+    rule = firewall_rule(Target="Drop", SourceMAC="02:00:5e:f0:00:05")
+    with pytest.raises(UspError):
+        controller.set({f"{rule}.Target": "Nuke"})
+    with pytest.raises(UspError):
+        controller.set({f"{rule}.DestPort": 70000})
+
+
+def test_client_active_is_not_writable(controller, usp_visible, attach_client_api):
+    """Effects cannot be set directly, by anyone - the rule holds for firmware too."""
+    client = attach_client_api(1, mac="02:00:5e:f0:00:06", hostname="ro")
+    usp_visible(f"{AP1}.AssociatedDevice.{client}.")
+    with pytest.raises(UspError):
+        controller.set({f"{AP1}.AssociatedDevice.{client}.Active": False})

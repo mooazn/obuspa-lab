@@ -115,6 +115,167 @@ def test_disk_monitor_survives_reboot_and_alarms_again(controller, plugin_booted
         lambda n: n["type"] == "event" and n.get("event_name") == "SpaceLow!", timeout=60)
 
 
+# ----------------------------------------------------------------------
+# parental-controls: vendor logic acting on the hardware through the data model
+# ----------------------------------------------------------------------
+
+PC = "Device.X_VDEV_ParentalControls."
+FW_COUNT = "Device.Firewall.Chain.1.RuleNumberOfEntries"
+
+
+def _settle(seconds: float = 4.0) -> None:
+    """The example reconciles every 2 s; give it a cycle."""
+    time.sleep(seconds)
+
+
+@pytest.fixture
+def pc_rule(controller):
+    """Creates vendor rules and deletes them afterwards, then lets the plug-in
+    remove the firewall rules it owns."""
+    created: list[str] = []
+
+    def _add(**params) -> str:
+        path = controller.add(PC + "Rule.", params)
+        created.append(path)
+        _settle()
+        return path
+
+    yield _add
+    for path in created:
+        try:
+            controller.delete(path)
+        except Exception:
+            pass
+    _settle()
+
+
+def test_vendor_object_is_served_after_boot(controller, plugin_booted, wait_for_agent):
+    wait_for_agent(timeout=60)
+    assert controller.get_one(PC + "Enable") == "true"
+    assert controller.get(PC + "Rule.") == {}
+
+
+def test_vendor_rule_creates_a_firewall_rule_and_blocks_the_client(
+        controller, plugin_booted, attach_client_api, pc_rule, wait_for_agent):
+    """The whole loop: controller -> vendor object -> vendor thread -> hardware.
+
+    The vendor thread creates the firewall rule through the HAL (rows are the
+    hardware's), the device derives the client inactive, and the vendor's
+    event goes out - none of it with simulator-specific code in the plug-in.
+    """
+    wait_for_agent(timeout=60)
+    mac = "02:00:5e:c0:10:01"
+    client = attach_client_api(1, mac=mac, hostname="tablet")
+    client_path = f"Device.WiFi.AccessPoint.1.AssociatedDevice.{client}"
+    baseline = int(controller.get_one(FW_COUNT))
+
+    controller.subscribe("Event", PC + "RuleApplied!")
+    controller.clear_notifications()
+
+    rule = pc_rule(MACAddress=mac, Description="bedtime")
+
+    applied = controller.wait_for_notification(
+        lambda n: n["type"] == "event" and n.get("event_name") == "RuleApplied!", timeout=15)
+    assert applied["params"]["MACAddress"] == mac
+
+    assert int(controller.get_one(FW_COUNT)) == baseline + 1
+    firewall = controller.get("Device.Firewall.Chain.1.Rule.")
+    tagged = {k: v for k, v in firewall.items()
+              if k.endswith(".Description") and v == "X_VDEV_ParentalControls:" + rule.rstrip(".").rsplit(".", 1)[1]}
+    assert tagged, firewall
+    fw_rule = next(iter(tagged)).rsplit(".", 1)[0]
+    assert firewall[fw_rule + ".SourceMAC"] == mac
+    assert firewall[fw_rule + ".Target"] == "Drop"
+
+    assert controller.get_one(client_path + ".Active") == "false"
+    assert controller.get_one(rule + "Status") == "Blocking"
+
+
+def test_disabling_the_vendor_rule_lifts_the_block(controller, plugin_booted, attach_client_api,
+                                                    pc_rule, wait_for_agent):
+    """Changing a value goes through obuspa's own API from the vendor thread."""
+    wait_for_agent(timeout=60)
+    mac = "02:00:5e:c0:10:02"
+    client = attach_client_api(1, mac=mac, hostname="phone")
+    path = f"Device.WiFi.AccessPoint.1.AssociatedDevice.{client}.Active"
+
+    rule = pc_rule(MACAddress=mac)
+    assert controller.get_one(path) == "false"
+
+    controller.set({rule + "Enable": False})
+    _settle()
+    assert controller.get_one(path) == "true"
+    assert controller.get_one(rule + "Status") == "Idle"
+
+    controller.set({rule + "Enable": True})
+    _settle()
+    assert controller.get_one(path) == "false"
+
+
+def test_global_disable_idles_every_rule(controller, plugin_booted, attach_client_api,
+                                         pc_rule, wait_for_agent):
+    wait_for_agent(timeout=60)
+    mac = "02:00:5e:c0:10:03"
+    client = attach_client_api(1, mac=mac, hostname="laptop")
+    path = f"Device.WiFi.AccessPoint.1.AssociatedDevice.{client}.Active"
+    rule = pc_rule(MACAddress=mac)
+    assert controller.get_one(path) == "false"
+
+    controller.set({PC + "Enable": False})
+    _settle()
+    try:
+        assert controller.get_one(path) == "true"
+        assert controller.get_one(rule + "Status") == "Idle"
+    finally:
+        controller.set({PC + "Enable": True})
+        _settle()
+
+
+def test_deleting_the_vendor_rule_removes_the_firewall_rule(controller, plugin_booted,
+                                                            attach_client_api, wait_for_agent):
+    """Removing a row goes through the hardware layer, and the agent survives it."""
+    wait_for_agent(timeout=60)
+    mac = "02:00:5e:c0:10:04"
+    client = attach_client_api(1, mac=mac, hostname="console")
+    path = f"Device.WiFi.AccessPoint.1.AssociatedDevice.{client}.Active"
+    baseline = int(controller.get_one(FW_COUNT))
+
+    rule = controller.add(PC + "Rule.", {"MACAddress": mac})
+    _settle()
+    assert int(controller.get_one(FW_COUNT)) == baseline + 1
+
+    controller.delete(rule)
+    _settle()
+    assert int(controller.get_one(FW_COUNT)) == baseline
+    assert controller.get_one(path) == "true"
+    assert system_state("http://localhost:8080")["agent"]["eventsConnected"] is True
+
+
+def test_vendor_rules_survive_a_reboot_and_relink(controller, plugin_booted, attach_client_api,
+                                                  reboot_and_wait, wait_for_agent):
+    """Vendor rules persist in the agent's database, firewall rules in the
+    device's configuration; on boot the plug-in finds its rules by tag."""
+    wait_for_agent(timeout=60)
+    mac = "02:00:5e:c0:10:05"
+    rule = controller.add(PC + "Rule.", {"MACAddress": mac})
+    _settle()
+    before = int(controller.get_one(FW_COUNT))
+
+    reboot_and_wait()
+    _settle()
+
+    assert controller.get_one(rule + "MACAddress") == mac
+    assert int(controller.get_one(FW_COUNT)) == before, "no duplicate firewall rule after reboot"
+    assert controller.get_one(rule + "Status") == "Blocking"
+
+    # The client reassociates after the reboot and is blocked straight away
+    client = attach_client_api(1, mac=mac, hostname="back")
+    assert controller.get_one(f"Device.WiFi.AccessPoint.1.AssociatedDevice.{client}.Active") == "false"
+
+    controller.delete(rule)
+    _settle()
+
+
 def test_vendor_logic_is_absent_without_the_card(controller, plugin_booted, device_url,
                                                   wait_for_agent):
     """Reboot with the card ejected: the built-in image runs, your code does not.

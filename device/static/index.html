@@ -395,6 +395,11 @@ function renderBootTag(sys) {
   const label = card.manifest ? card.manifest.label : null;
   const plugins = (b.plugins || []).map(p => p.split("/").pop().replace(/\.so$/, ""));
   if (sys.rebooting) { tag.textContent = "rebooting…"; tag.className = "boot-tag"; return; }
+  if (sys.agent && sys.agent.crashLooping) {
+    tag.textContent = "agent restarting repeatedly - check the Console tab; eject the card to recover";
+    tag.className = "boot-tag warn";
+    return;
+  }
 
   let text, cls = "boot-tag";
   if (b.from === "sdcard" && b.manifest) {

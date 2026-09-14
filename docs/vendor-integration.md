@@ -44,13 +44,13 @@ A plug-in directory is one of:
   is a good template.
 - **A directory of `.c` files, no Makefile.** Everything is compiled into one
   `.so` with `-fPIC -DENABLE_UDS -I<tree>/src/{include,vendor,core}` and
-  `-lpthread`, plus the vhal client (see §3).
+  `-lpthread`, plus the vhal client (see §4).
 
 The directory's name becomes the plug-in's name. Plug-ins are compiled inside
 the platform's build container, **against the obuspa tree the card will
 boot** — the built-in one, or the one you flashed with `SRC`/`REF`. That is
 deliberate: obuspa's vendor API moves between releases, and this catches it
-before it reaches a device (see §5, logging).
+before it reaches a device (see §6, logging).
 
 ### As a whole tree
 
@@ -95,11 +95,27 @@ few seconds and the Console tab showing the same boot over and over. The
 dlopen error is in that console. (`system.agent.eventsConnected` stays
 `false` the whole time; the 3D view's power LED never settles.)
 
-**Order.** Plug-ins initialise in `-x` order. The platform's proxy comes
-first, so the TR-181 data model it serves (`Device.WiFi.*`, `Device.Hosts.*`,
-`Device.Cellular.*`, …) exists by the time yours runs. Register your own
-objects under a vendor prefix (`Device.X_<VENDOR>_Thing.`); registering paths
-the proxy already owns fails.
+**Order, and what the platform owns.** Plug-ins initialise in `-x` order.
+The platform's proxy comes first, so the TR-181 data model it serves
+(`Device.WiFi.*`, `Device.Hosts.*`, `Device.Firewall.*`, `Device.Cellular.*`,
+…) exists by the time yours runs. Those standard, hardware-facing subtrees
+are the platform's: they are the simulated hardware. Register your own
+objects under a vendor prefix (`Device.X_<VENDOR>_Thing.`).
+
+Registering a path the platform already provides fails. obuspa logs the
+exact path and returns `USP_ERR_INTERNAL_ERROR` (7003) from the
+`USP_REGISTER_*` call:
+
+```
+DM_PRIV_AddSchemaPath: Path Device.WiFi.SSID.{i}.SSID already exists in schema
+```
+
+What happens next depends on your `VENDOR_Init`. Return the error and obuspa
+exits immediately - a crash loop, flagged in the Console tab and on the boot
+tag, with that line showing on every pass. Swallow it and the agent comes up
+with your registration silently missing, which is harder to notice; prefer
+the loud failure. Either way the fix is the same: keep to a vendor prefix,
+and act on the standard subtrees through the data model (§3).
 
 **`VENDOR_Stop` never runs.** A simulated reboot is a power cycle — the agent
 is `_exit()`ed, not shut down — exactly as firmware loses power. Do not rely
@@ -124,7 +140,54 @@ runs again. State you did not persist is gone — same as hardware.
 
 ---
 
-## 3. Stimulating your code
+## 3. Acting on the hardware
+
+Vendor logic changes things: it blocks a client, brings an interface down,
+rewrites a firewall. On a real device that logic reaches the hardware through
+the data model the vendor implemented on top of the drivers. On the platform
+the standard TR-181 subtrees *are* the simulated hardware, so the same calls
+reach it:
+
+```c
+/* on the data model thread (VENDOR_Start, a callback, a DoWork callback) */
+USP_DM_GetParameterValue("Device.WiFi.SSID.1.SSID", buf, sizeof buf);
+USP_DM_SetParameterValue("Device.WiFi.Radio.2.Enable", "false");
+
+/* from your own thread */
+USP_PROCESS_DM_SetParameterValue("Device.Firewall.Chain.1.Rule.3.Enable", "true", err, sizeof err);
+USP_PROCESS_DoWorkSync(snapshot_callback, &snapshot, NULL);   /* runs on the data model thread */
+```
+
+The device reacts as hardware would: disable a radio and its SSIDs go down
+and its clients drop; add a Drop rule naming a MAC and that client's
+`Hosts.Host` and `AssociatedDevice` rows go inactive. Nothing in the plug-in
+knows it is not talking to a driver.
+
+**Values are the data model's; rows are the hardware's.** obuspa's API reads
+and sets parameters. It cannot create an instance, and `USP_DM_DeleteInstance`
+may only run inside a transaction obuspa itself opened (a Set or Operate
+callback) - calling it from a vendor thread trips an assertion and exits the
+agent. On a real device creating and deleting rows is the vendor's hardware
+layer: the call into the firewall engine, which then informs obuspa. On the
+platform that layer is the HAL:
+
+```c
+int fw;
+vhal_dm_add("Device.Firewall.Chain.1.Rule.", &fw);                 /* -> instance number */
+vhal_dm_set("Device.Firewall.Chain.1.Rule.3.SourceMAC", mac, err, sizeof err);
+vhal_dm_delete("Device.Firewall.Chain.1.Rule.3");
+```
+
+These act with hardware privileges - they may create, set and delete what a
+controller may not - and the device signals obuspa, so a subscribed
+controller sees the ObjectCreation. Nothing may set a *derived* effect
+directly (`Hosts.Host.Active`, `AssociatedDevice.Active`): obuspa refuses
+with 7013 for firmware and controllers alike. Write the cause; the device
+derives the effect.
+
+`examples/parental-controls/` uses every path above.
+
+## 4. Stimulating your code
 
 ### Through the environment (no changes to your code)
 
@@ -148,8 +211,10 @@ Disabling the WAN over USP (`Device.IP.Interface.1.Enable = false`) is a real
 link loss too: the Set is answered, then the link drops. Re-enable it through
 the UI or `POST /api/set`, since the controller can no longer reach the agent.
 
-### Through the virtual HAL (opt-in, for code that reads hardware)
+### Through the virtual HAL (opt-in)
 
+The HAL is the escape hatch for what the data model does not cover: reading
+hardware the model does not represent, and creating or deleting rows (§3).
 Code that reads a temperature sensor, a modem's RSSI, a chipset SDK — things
 a container does not have — has nothing to read here. If that code sits
 behind a HAL of your own (`hal_get_temp()`, one backend per board), write a
@@ -182,7 +247,7 @@ threshold as if it came from a board's EEPROM.
 
 ---
 
-## 4. Observing what it did
+## 5. Observing what it did
 
 - **USP tab** / `GET /api/usp/timeline` / `WS /ws/usp` — every record between
   agent and controller, decoded: direction, message type, a one-line summary,
@@ -198,7 +263,7 @@ threshold as if it came from a board's EEPROM.
 
 ---
 
-## 5. Things that bite
+## 6. Things that bite
 
 **Logging.** Use `USP_LOG_Printf(kLogLevel_Info, kLogType_Debug, fmt, …)`.
 The convenience macros `USP_LOG_Error/Warning/Info` are **not stable across
@@ -240,6 +305,13 @@ non-TLS connections (`ROLE_NON_SSL`, full access in `vendor_defs.h`). On a
 real deployment with TLS it would mean the controller's certificate could not
 be mapped to a role.
 
+**A row you just created is not visible over USP instantly.** `vhal_dm_add`
+returns when the device has the row; obuspa learns of it a few milliseconds
+later, when the plug-in's event thread delivers the ObjectAdded signal. A
+controller Get in that window sees the previous instance list. Real agents
+behave the same way; tests should wait for visibility rather than assume it
+(`tests/conftest.py::usp_visible`).
+
 **The broker's name.** The agent connects to `mosquitto`. On this platform
 that name resolves to the *device* container, whose WAN relay forwards to the
 real broker (`broker`). That is how WAN faults reach the agent without any
@@ -247,9 +319,17 @@ change to its factory configuration.
 
 ---
 
-## 6. Worked example
+## 7. Worked examples
 
-`examples/disk-monitor/` — ~200 lines of C: a vendor object with a live
-getter, a persisted controller-writable threshold, a background thread doing
-`statvfs()`, a `SpaceLow!` event with arguments, one optional `vhal_get`.
-`README.md` there walks through running it; the tests above prove it.
+`examples/disk-monitor/` — a vendor object with a live getter, a persisted
+controller-writable threshold, a background thread doing `statvfs()`, a
+`SpaceLow!` event, one optional `vhal_get`. Logic that *observes* and alarms.
+
+`examples/parental-controls/` — a controller-managed vendor object
+(`Rule.{i}` with a MAC), a thread that reconciles it against
+`Device.Firewall`: reads via `USP_PROCESS_DoWorkSync`, changes via
+`USP_PROCESS_DM_SetParameterValue`, creates and deletes rules via the HAL,
+survives reboots by re-linking rules it tagged. Logic that *acts* on the
+hardware.
+
+Each has a `README.md`; `tests/test_06_vendor_plugin.py` proves both.
