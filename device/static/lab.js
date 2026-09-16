@@ -76,7 +76,7 @@ const consolePanel = {
     const line = el("div", "line", entry.text);
     if (/^entrypoint: ==== boot/.test(entry.text)) line.classList.add("boot");
     else if (/^entrypoint:/.test(entry.text)) line.classList.add("boot-loader");
-    else if (/ERROR|Error:|Failed|error:/.test(entry.text)) line.classList.add("err");
+    else if (/ERROR|Error:|Failed|error:|already exists in schema|Unable to load|undefined symbol/.test(entry.text)) line.classList.add("err");
     else if (/WARNING|Warning/.test(entry.text)) line.classList.add("warn");
     this.lines.appendChild(line);
     if (++this.count > 3000) { this.lines.removeChild(this.lines.firstChild); this.count--; }
@@ -98,7 +98,11 @@ const consolePanel = {
   onState(state) {
     const agent = (state.system && state.system.agent) || {};
     const up = !!agent.eventsConnected;
-    this.status.textContent = up ? "agent: up" : (state.system && state.system.rebooting ? "agent: rebooting" : "agent: not connected");
+    if (agent.crashLooping) {
+      this.status.textContent = `agent: restarting repeatedly (${agent.recentBoots} boots in the last 5 minutes) - see the error lines above`;
+    } else {
+      this.status.textContent = up ? "agent: up" : (state.system && state.system.rebooting ? "agent: rebooting" : "agent: not connected");
+    }
     this.status.className = "pill " + (up ? "ok" : "bad");
   },
 };

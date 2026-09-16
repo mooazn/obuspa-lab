@@ -18,7 +18,7 @@ import os
 from typing import Any
 
 from .core import DeviceError, UnknownPathError, VirtualDevice
-from .model import ObjectDef, ParamDef, TYPE_BOOL, TYPE_UINT
+from .model import ObjectDef, ParamDef, TYPE_BOOL, TYPE_INT, TYPE_UINT
 
 log = logging.getLogger(__name__)
 
@@ -45,12 +45,12 @@ def decode(param: ParamDef, text: str) -> Any:
             return False
         raise DeviceError(f"invalid boolean value: {text!r}")
 
-    if param.type == TYPE_UINT:
+    if param.type in (TYPE_UINT, TYPE_INT):
         try:
             number = int(text)
         except ValueError as exc:
-            raise DeviceError(f"invalid unsigned integer: {text!r}") from exc
-        if number < 0:
+            raise DeviceError(f"invalid integer: {text!r}") from exc
+        if param.type == TYPE_UINT and number < 0:
             raise DeviceError(f"value must not be negative: {text!r}")
         return number
 
@@ -186,6 +186,18 @@ class ShimServer:
             writer.close()
             log.info("agent event subscription closed")
 
+    def _op_hal_dm_add(self, request: dict) -> dict:
+        path = request.get("path") or ""
+        instance = self.device.add(path, internal=True)
+        log.info("hal: added %s%d", path if path.endswith(".") else path + ".", instance)
+        return {"ok": True, "instance": instance}
+
+    def _op_hal_dm_delete(self, request: dict) -> dict:
+        path = request.get("path") or ""
+        self.device.delete(path, internal=True)
+        log.info("hal: deleted %s", path)
+        return {"ok": True}
+
     def _op_hal_set(self, request):
         self.device.hal_set(request["key"], request["value"])
         return {"ok": True}
@@ -280,6 +292,13 @@ class ShimServer:
         handler = {
             "hal_get": lambda r: {"ok": True, "value": self.device.hal_get(r["key"])},
             "hal_set": self._op_hal_set,
+            # Data model operations from the firmware's HAL backend. These act
+            # as the hardware layer: they may create, set and delete what a
+            # controller may not, and they bypass controller-facing validation
+            # the way a driver reporting state does.
+            "hal_dm_add": self._op_hal_dm_add,
+            "hal_dm_set": lambda r: self._op_set(r, internal=True),
+            "hal_dm_delete": self._op_hal_dm_delete,
             "model": self._op_model,
             "instances": self._op_instances,
             "get": self._op_get,
@@ -365,7 +384,7 @@ class ShimServer:
 
         return {"ok": True, "values": values}
 
-    def _op_set(self, request: dict) -> dict:
+    def _op_set(self, request: dict, internal: bool = False) -> dict:
         raw = request.get("params") or {}
         ordered_paths = list(raw.keys())
 
@@ -384,7 +403,7 @@ class ShimServer:
                 }
 
         try:
-            self.device.set_many(updates)
+            self.device.set_many(updates, internal=internal)
         except DeviceError as exc:
             failed_path = getattr(exc, "path", None)
             index = (

@@ -271,6 +271,26 @@ static int request(const char *op, const char *key, const char *value,
     return *response ? 0 : -1;
 }
 
+/* Sends an already-formed request line and returns the response line. */
+static int transact(const char *line, char **response)
+{
+    int fd = connect_device(TIMEOUT_SECS);
+    int rc;
+
+    if (fd < 0)
+        return -1;
+    rc = send_all(fd, line, strlen(line));
+    *response = rc == 0 ? read_line(fd) : NULL;
+    close(fd);
+    return *response ? 0 : -1;
+}
+
+static int response_ok(const char *response)
+{
+    char ok[8];
+    return json_member(response, "ok", ok, sizeof ok) == 2 && strcmp(ok, "true") == 0;
+}
+
 int vhal_get(const char *key, char *value, size_t size)
 {
     char *response;
@@ -343,4 +363,71 @@ int vhal_watch(const char *prefix, vhal_watch_cb callback, void *ctx)
     }
     close(fd);
     return -1;
+}
+
+/* ------------------------------------------------------------------ data model */
+
+int vhal_dm_add(const char *object_path, int *instance)
+{
+    char qpath[600], line[700], number[32];
+    char *response;
+    int rc = -1;
+
+    if (object_path == NULL || instance == NULL)
+        return -1;
+    if (json_quote(object_path, qpath, sizeof qpath) < 0)
+        return -1;
+    snprintf(line, sizeof line, "{\"op\":\"hal_dm_add\",\"path\":%s}\n", qpath);
+
+    if (transact(line, &response) < 0)
+        return -1;
+    if (response_ok(response) && json_member(response, "instance", number, sizeof number) == 2) {
+        *instance = atoi(number);
+        rc = 0;
+    }
+    free(response);
+    return rc;
+}
+
+int vhal_dm_set(const char *path, const char *value, char *err, size_t err_size)
+{
+    char qpath[600], qval[4400], line[5200];
+    char *response;
+    int rc = -1;
+
+    if (err && err_size)
+        err[0] = '\0';
+    if (path == NULL || value == NULL)
+        return -1;
+    if (json_quote(path, qpath, sizeof qpath) < 0 || json_quote(value, qval, sizeof qval) < 0)
+        return -1;
+    snprintf(line, sizeof line, "{\"op\":\"hal_dm_set\",\"params\":{%s:%s}}\n", qpath, qval);
+
+    if (transact(line, &response) < 0)
+        return -1;
+    if (response_ok(response))
+        rc = 0;
+    else if (err && err_size)
+        json_member(response, "error", err, err_size);
+    free(response);
+    return rc;
+}
+
+int vhal_dm_delete(const char *instance_path)
+{
+    char qpath[600], line[700];
+    char *response;
+    int rc;
+
+    if (instance_path == NULL)
+        return -1;
+    if (json_quote(instance_path, qpath, sizeof qpath) < 0)
+        return -1;
+    snprintf(line, sizeof line, "{\"op\":\"hal_dm_delete\",\"path\":%s}\n", qpath);
+
+    if (transact(line, &response) < 0)
+        return -1;
+    rc = response_ok(response) ? 0 : -1;
+    free(response);
+    return rc;
 }

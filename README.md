@@ -35,9 +35,11 @@ not need a board, a card reader, or a power strip.
   v10 on a v11 device is one of the tests.
 - **Your code, on the platform.** `make flash PLUGINS=path/to/my-plugin`
   builds your obuspa plug-in — a data model, a background thread, whatever
-  your firmware carries — against the tree the card will boot. The platform
-  never learns what your code does; your code never learns it is on the
-  platform. See **[docs/vendor-integration.md](docs/vendor-integration.md)**.
+  your firmware carries — against the tree the card will boot. Your logic acts
+  on the simulated hardware through the same data model calls it makes on a
+  real device. The platform never learns what your code does; your code never
+  learns it is on the platform. See
+  **[docs/vendor-integration.md](docs/vendor-integration.md)**.
 - **Ways to stimulate it.** Environment faults with no code changes — fill
   the data partition (`statvfs()` sees it), cut the WAN, add latency —
   persisted and re-applied on every boot. An opt-in virtual HAL for code that
@@ -45,11 +47,13 @@ not need a board, a card reader, or a power strip.
 - **Ways to observe it.** A serial console, a decoded USP timeline, and a
   Python USP controller you can write tests against.
 
-**The scenario it exists for**, proved by `examples/disk-monitor/` and its
-tests: a vendor's background thread does `statvfs()` on `/data`; the lab fills
-it to 95 %; `Device.X_VDEV_DiskMonitor.SpaceLow!` arrives at the controller;
-clear the fault and the value drops; reboot with the disk still full and it
-alarms again.
+**Two scenarios it exists for**, each a worked example with tests.
+`examples/disk-monitor/`: a vendor thread does `statvfs()` on `/data`; the
+lab fills it to 95 %; `SpaceLow!` arrives at the controller; reboot with the
+disk still full and it alarms again. `examples/parental-controls/`: a
+controller adds a vendor rule naming a client; the vendor's thread writes a
+firewall rule; the device takes the client offline; the rule survives a
+reboot and blocks the client when it reassociates.
 
 ## Quick start
 

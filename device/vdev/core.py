@@ -169,6 +169,9 @@ class VirtualDevice:
         # vendor plug-in with a missing symbol) never gets this far.
         self.agent_connected = False
         self.agent_connected_since: Optional[float] = None
+        # Returns the number of agent boots in the last five minutes (longer than
+        # the container restart backoff); set by main
+        self._recent_boots: Callable[[], int] = lambda: 0
 
         self.fault_state: dict[str, dict] = {}
         self.hal: dict[str, str] = {}
@@ -321,6 +324,9 @@ class VirtualDevice:
                 callback(event)
             except Exception:
                 log.exception("event listener failed for %s", event.get("event"))
+
+    def set_boot_probe(self, probe: Callable[[], int]) -> None:
+        self._recent_boots = probe
 
     def set_agent_connected(self, connected: bool) -> None:
         with self._lock:
@@ -543,6 +549,10 @@ class VirtualDevice:
                     "agent": {
                         "eventsConnected": self.agent_connected,
                         "since": self.agent_connected_since,
+                        "recentBoots": (recent := self._recent_boots()),
+                        # Restarting repeatedly without ever connecting: a
+                        # plug-in that fails to load, or a data model collision
+                        "crashLooping": recent >= 3 and not self.agent_connected,
                     },
                 },
             }

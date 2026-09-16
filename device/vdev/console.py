@@ -33,6 +33,10 @@ class ConsoleTail:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
+        # Timestamps of boot markers seen in the log, most recent last. Several
+        # in quick succession means the agent is failing to start.
+        self._boots: collections.deque = collections.deque(maxlen=50)
+
     # ------------------------------------------------------------------
 
     def start(self) -> None:
@@ -63,6 +67,12 @@ class ConsoleTail:
     def latest_seq(self) -> int:
         return self._seq
 
+    def boots_within(self, seconds: float) -> int:
+        """How many boot markers arrived in the last `seconds`."""
+        cutoff = time.time() - seconds
+        with self._lock:
+            return sum(1 for ts in self._boots if ts >= cutoff)
+
     # ------------------------------------------------------------------
 
     def _emit(self, text: str) -> None:
@@ -70,6 +80,8 @@ class ConsoleTail:
             self._seq += 1
             entry = {"seq": self._seq, "ts": time.time(), "text": text}
             self._history.append(entry)
+            if text.startswith("entrypoint: ==== boot"):
+                self._boots.append(entry["ts"])
             subscribers = list(self._subscribers)
         for callback in subscribers:
             try:

@@ -218,6 +218,42 @@ def attach_client_api(device_url):
 
 
 @pytest.fixture
+def usp_visible(controller):
+    """Waits until the agent serves a path the device just created.
+
+    The device signals new instances to obuspa asynchronously (ObjectAdded
+    over the plug-in's event stream), so a Get issued immediately after a
+    device-side add can see the previous instance list. Real agents behave the
+    same way; tests should wait rather than assume.
+    """
+    def _wait(path: str, timeout: float = 5.0) -> dict:
+        deadline = time.time() + timeout
+        last: Exception | None = None
+        while time.time() < deadline:
+            try:
+                values = controller.get(path)
+                if values:
+                    return values
+            except Exception as exc:
+                last = exc
+            time.sleep(0.2)
+        pytest.fail(f"{path} never became visible over USP within {timeout}s: {last}")
+
+    def _host_for(mac: str, timeout: float = 5.0) -> str:
+        """The Hosts.Host.{i} path whose PhysAddress is `mac`."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for key, value in controller.get("Device.Hosts.").items():
+                if key.endswith(".PhysAddress") and value == mac:
+                    return key.rsplit(".", 1)[0]
+            time.sleep(0.2)
+        pytest.fail(f"no Hosts.Host with PhysAddress {mac} within {timeout}s")
+
+    _wait.host_for = _host_for
+    return _wait
+
+
+@pytest.fixture
 def restore_radios(controller):
     """Puts both radios back on afterwards, so one test cannot strand another."""
     yield
@@ -330,7 +366,7 @@ def usp_timeline(device_url):
 
 @pytest.fixture(scope="module")
 def flashed_plugin_card(device_url):
-    """Flashes examples/disk-monitor onto the card for the duration of a module.
+    """Flashes the example plug-ins onto the card for the duration of a module.
 
     The developer's card is backed up first and restored afterwards, so the
     suite never eats a build someone was about to test. Skips when Docker is
@@ -353,8 +389,10 @@ def flashed_plugin_card(device_url):
             shutil.copy2(source, backup / name)
 
     result = subprocess.run(
-        [str(ROOT / "scripts" / "flash.sh"), "--plugin", str(ROOT / "examples" / "disk-monitor"),
-         "--label", "diskmon-test"],
+        [str(ROOT / "scripts" / "flash.sh"),
+         "--plugin", str(ROOT / "examples" / "disk-monitor"),
+         "--plugin", str(ROOT / "examples" / "parental-controls"),
+         "--label", "examples-test"],
         capture_output=True, text=True, timeout=900,
     )
     if result.returncode != 0:
