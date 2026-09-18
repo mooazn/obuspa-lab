@@ -46,6 +46,9 @@
  *   -> {"op":"reboot"}
  *   <- {"ok":true}
  *
+ *   -> {"op":"clock_sync"}                          (at init: the RTC read at boot)
+ *   <- {"ok":true,"faketime":"+0"}
+ *
  * Plus one long-lived connection carrying pushes from the device:
  *
  *   -> {"op":"events"}
@@ -53,6 +56,7 @@
  *   <- {"event":"operation_complete","request_id":3,"err_code":0,"output":{...}}
  *   <- {"event":"dm_event","name":"Device.Custom!","args":{...}}
  *   <- {"event":"object_added","path":"Device.WiFi.SSID.2"}
+ *   <- {"event":"clock","offset":3600,"rate":1}      (the lab moved the clock)
  */
 
 #define _GNU_SOURCE
@@ -127,6 +131,8 @@ static int RegisterEvents(cJSON *events);
 static cJSON *KvToJson(kv_vector_t *kvv);
 static void JsonToKv(cJSON *object, kv_vector_t *kvv);
 static void *EventThread(void *arg);
+static void SyncClock(void);
+static void ClockChanged(void *arg1, void *arg2);
 
 /*********************************************************************//**
 **
@@ -820,6 +826,13 @@ static void *EventThread(void *arg)
                     USP_SIGNAL_ObjectDeleted(path->valuestring);
                 }
             }
+            else if (strcmp(name->valuestring, "clock") == 0)
+            {
+                // The data model thread sleeps until its next timer deadline
+                // in real time. Posting work to it makes it re-evaluate its
+                // timers against the moved clock, so anything now due fires.
+                USP_PROCESS_DoWork(ClockChanged, NULL, NULL);
+            }
 
             cJSON_Delete(event);
         }
@@ -940,7 +953,55 @@ int VENDOR_Init(void)
     }
 
     VDEV_LOG_Info("%s: registered %d proxied data model entries from %s", __FUNCTION__, count, SockPath());
+
+    SyncClock();
     return USP_ERR_OK;
+}
+
+/*********************************************************************//**
+**
+** SyncClock
+**
+** Asks the device to rewrite the lab clock's control file, so that this
+** process starts on the current lab time. Failure is not an error: a device
+** without a lab clock leaves the firmware on real time.
+**
+**************************************************************************/
+static void SyncClock(void)
+{
+    cJSON *request = cJSON_CreateObject();
+    cJSON *response;
+    cJSON *faketime;
+
+    cJSON_AddStringToObject(request, "op", "clock_sync");
+    response = Rpc(request);
+    cJSON_Delete(request);
+
+    if (response == NULL)
+    {
+        return;
+    }
+
+    faketime = cJSON_GetObjectItem(response, "faketime");
+    if (cJSON_IsString(faketime) && strcmp(faketime->valuestring, "+0") != 0)
+    {
+        VDEV_LOG_Info("%s: lab clock is %s", __FUNCTION__, faketime->valuestring);
+    }
+    cJSON_Delete(response);
+}
+
+/*********************************************************************//**
+**
+** ClockChanged
+**
+** Runs on the data model thread after the lab moved the clock. Nothing to
+** do: waking the thread is the point.
+**
+**************************************************************************/
+static void ClockChanged(void *arg1, void *arg2)
+{
+    (void)arg1;
+    (void)arg2;
 }
 
 /*********************************************************************//**

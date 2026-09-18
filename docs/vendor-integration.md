@@ -211,6 +211,35 @@ Disabling the WAN over USP (`Device.IP.Interface.1.Enable = false`) is a real
 link loss too: the Set is answered, then the link drops. Re-enable it through
 the UI or `POST /api/set`, since the controller can no longer reach the agent.
 
+### Through the clock
+
+Anything scheduled hours or days out - periodic statistics windows,
+time-referenced sample intervals, `Periodic!`, retry backoffs, your own
+timers - can be exercised in seconds by moving the lab clock. The
+**Faults & clock** tab, or:
+
+```
+POST   /api/clock {"jump": 3600}         # one hour ahead, for the device and the firmware
+POST   /api/clock {"rate": 60}           # run at 60x; jump and rate may be combined
+DELETE /api/clock                        # back to real time
+GET    /api/clock                        # {"real", "offset", "rate", "now", "nowIso"}
+```
+
+The firmware runs under [libfaketime](https://github.com/wolfcw/libfaketime):
+`time()`, `gettimeofday()`, `clock_gettime(CLOCK_REALTIME)` and the sleeping
+calls (`poll`, `select`, `nanosleep`, …) all follow the lab clock, and a rate
+above 1 shortens every wait. Your code needs no change to be affected, and
+nothing in it can tell. Two things stay real: `CLOCK_MONOTONIC`, and the
+kernel's uptime counter (`Device.DeviceInfo.UpTime`, `/proc/uptime`) - the
+same things a wall-clock change leaves alone on hardware.
+
+A jump takes effect at once: the agent's timer loop is woken so that
+whatever the jump made due fires immediately, rather than at the next
+unrelated activity. The clock persists across reboots the way an RTC keeps
+its time, and a factory reset does not touch it. The rate is capped at 60:
+the controller and the broker are on real time, so a fast firmware pings
+and retries more often than they expect.
+
 ### Through the virtual HAL (opt-in)
 
 The HAL is the escape hatch for what the data model does not cover: reading

@@ -10,7 +10,7 @@ not need a board, a card reader, or a power strip.
 
 ```
  your plug-ins  ──┐
- your obuspa tree ┼─▶ agent container ("firmware")  ◀── faults: disk, WAN link, latency
+ your obuspa tree ┼─▶ agent container ("firmware")  ◀── faults: disk, WAN link, latency · clock
  our proxy plugin ┘        │  console · USP tap
                            │ Unix socket
                     device container ("hardware")   ◀── 3D device, data model, HAL
@@ -42,8 +42,10 @@ not need a board, a card reader, or a power strip.
   **[docs/vendor-integration.md](docs/vendor-integration.md)**.
 - **Ways to stimulate it.** Environment faults with no code changes — fill
   the data partition (`statvfs()` sees it), cut the WAN, add latency —
-  persisted and re-applied on every boot. An opt-in virtual HAL for code that
-  reads hardware a container does not have.
+  persisted and re-applied on every boot. A lab clock that jumps the
+  firmware's time or runs it at up to 60×, so a day-long schedule finishes
+  in seconds. An opt-in virtual HAL for code that reads hardware a container
+  does not have.
 - **Ways to observe it.** A serial console, a decoded USP timeline, and a
   Python USP controller you can write tests against.
 

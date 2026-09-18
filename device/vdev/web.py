@@ -252,6 +252,24 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None) -> Fast
             raise HTTPException(status_code=404, detail=f"no such fault: {kind}") from exc
         return {"ok": True}
 
+    @app.get("/api/clock")
+    async def get_clock() -> dict:
+        return device.clock.snapshot()
+
+    @app.post("/api/clock")
+    async def adjust_clock(body: dict) -> dict:
+        """Jumps the clock by `jump` seconds and/or sets `rate` (1-60)."""
+        if not any(k in body for k in ("jump", "rate")):
+            raise HTTPException(status_code=400, detail="body needs jump and/or rate")
+        try:
+            return device.adjust_clock(jump=body.get("jump"), rate=body.get("rate"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/clock")
+    async def reset_clock() -> dict:
+        return device.reset_clock()
+
     @app.get("/api/wan")
     async def wan_state() -> dict:
         if device.wan is None:

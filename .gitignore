@@ -21,3 +21,5 @@ sdcard/plugins/
 # kept locally, not published
 docs/history.md
 docs/design-decisions.md
+docs/backlog.md
+backlog.md
