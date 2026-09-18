@@ -125,6 +125,14 @@ printf '{"from":"%s","binary":"%s","cardSeated":%s,"plugins":[%s],"manifest":%s,
 # --- 5. start ---------------------------------------------------------------------
 log "starting $BIN ($BOOT_FROM)"
 
+# The firmware keeps the lab's time, not the host's. libfaketime re-reads the
+# device-written control file on every call; the plug-in asks the device to
+# rewrite it during init so this process anchors to the current lab time.
+export LD_PRELOAD=/usr/local/lib/libfaketime.so.1
+export FAKETIME_TIMESTAMP_FILE="$RUN_DIR/faketime"
+export FAKETIME_NO_CACHE=1
+export TZ=UTC
+
 exec "$BIN" \
     -p -v "$VERBOSITY" \
     -r "$RESET_FILE" \

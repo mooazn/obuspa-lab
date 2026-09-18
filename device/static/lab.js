@@ -128,12 +128,51 @@ async function post(url, body, method = "POST") {
   return res.json();
 }
 
+function fmtDuration(seconds) {
+  const d = Math.floor(seconds / 86400), h = Math.floor(seconds % 86400 / 3600), m = Math.floor(seconds % 3600 / 60);
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m || !parts.length) parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
 const faultsPanel = {
   mount(section) {
     const head = el("div", "panel-head");
     this.wanPill = el("span", "pill", "wan: ?");
     head.append(this.wanPill);
     section.appendChild(head);
+
+    // The lab clock: what time the device and the firmware believe it is
+    const clock = el("div", "card clock");
+    const chead = el("div", "row-head");
+    this.clockNow = el("span", "inst", "");
+    this.clockPill = el("span", "badge", "");
+    chead.append(this.clockNow, el("span", "spacer"), this.clockPill);
+    const reset = el("button", "ghost", "Real time");
+    reset.onclick = () => post("/api/clock", undefined, "DELETE").catch(e => alert(e.message));
+    chead.append(reset);
+    const jumps = el("div", "sys");
+    jumps.append(el("span", "ro", "jump"));
+    for (const [label, secs] of [["+1 min", 60], ["+1 h", 3600], ["+1 day", 86400]]) {
+      const b = el("button", "", label);
+      b.onclick = () => post("/api/clock", { jump: secs }).catch(e => alert(e.message));
+      jumps.append(b);
+    }
+    jumps.append(el("span", "ro", "rate"));
+    this.rate = document.createElement("select");
+    for (const r of [1, 5, 10, 30, 60]) {
+      const o = document.createElement("option"); o.value = r; o.textContent = `${r}×`; this.rate.appendChild(o);
+    }
+    this.rate.onchange = () => post("/api/clock", { rate: Number(this.rate.value) }).catch(e => alert(e.message));
+    jumps.append(this.rate);
+    clock.append(chead, jumps,
+      el("div", "help", "Moves the clock for the device and the firmware together. Timers that become due fire at once; " +
+                        "a rate above 1× runs every schedule that much faster. Persists across reboots like an RTC."));
+    section.appendChild(clock);
+    this.clock = null;
+    setInterval(() => this.tickClock(), 1000);
 
     this.active = el("div", "faults-active");
     section.appendChild(this.active);
@@ -171,9 +210,26 @@ const faultsPanel = {
     catch (e) { alert(e.message); }
   },
 
+  tickClock() {
+    if (!this.clock) return;
+    const c = this.clock;
+    const now = c.now + (Date.now() / 1000 - c.receivedAt) * c.rate;
+    this.clockNow.textContent = new Date(now * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  },
+
   onState(state) {
     const sys = state.system || {};
     const wan = sys.wan || {};
+
+    if (sys.clock) {
+      this.clock = { ...sys.clock, receivedAt: Date.now() / 1000 };
+      this.tickClock();
+      const c = sys.clock;
+      const off = Math.abs(c.offset) < 1 ? "" : (c.offset > 0 ? "+" : "-") + fmtDuration(Math.abs(c.offset));
+      this.clockPill.textContent = c.real ? "real time" : [off, c.rate !== 1 ? `${c.rate}×` : ""].filter(Boolean).join(" · ");
+      this.clockPill.className = "badge " + (c.real ? "up" : "warn");
+      if (document.activeElement !== this.rate) this.rate.value = String(c.rate);
+    }
     this.wanPill.textContent = wan.linkUp === false
       ? `wan: down (${(wan.reasons || []).join(", ")})`
       : `wan: up · ${wan.connections ?? 0} conn · ${wan.latencyMs || 0} ms`;
@@ -309,7 +365,7 @@ export function initLab() {
   registerPanel("model",   "Data model", {});
   registerPanel("console", "Console",    consolePanel);
   registerPanel("usp",     "USP",        uspPanel);
-  registerPanel("faults",  "Faults",     faultsPanel);
+  registerPanel("faults",  "Faults & clock", faultsPanel);
   registerPanel("hal",     "HAL",        halPanel);
 
   let initial = "model";

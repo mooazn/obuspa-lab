@@ -299,6 +299,9 @@ class ShimServer:
             "hal_dm_add": self._op_hal_dm_add,
             "hal_dm_set": lambda r: self._op_set(r, internal=True),
             "hal_dm_delete": self._op_hal_dm_delete,
+            # The firmware reading the RTC on its way up: rewrites the clock
+            # control file so a fresh process anchors to the current lab time.
+            "clock_sync": lambda r: {"ok": True, "faketime": self.device.sync_clock()},
             "model": self._op_model,
             "instances": self._op_instances,
             "get": self._op_get,

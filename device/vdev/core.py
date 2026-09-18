@@ -33,6 +33,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from .labclock import LabClock
 from .model import (
     COMMANDS,
     EVENTS,
@@ -156,9 +157,14 @@ class VirtualDevice:
             for obj in self._model
         }
 
+        # The lab clock: what time the device and the firmware believe it is.
+        # A lab instrument like the faults - it persists, and survives a
+        # factory reset the way a hardware RTC does.
+        self.clock = LabClock(os.path.join(self.run_dir, "faketime") if self.run_dir else None)
+
         self.boot_count = 0
         self.reboot_cause = "FactoryReset"
-        self.booted_at = time.time()
+        self.booted_at = self.clock.now()
         self.rebooting = False
 
         self._jobs: dict[int, Job] = {}
@@ -181,6 +187,9 @@ class VirtualDevice:
         self._load_persisted()
         from .faults import FaultRegistry
         self.faults = FaultRegistry(self)
+        # The control file is rewritten now so that an agent booting against a
+        # stale volume never runs on a clock the device no longer holds.
+        self.clock.write_file()
 
     # ------------------------------------------------------------------
     # Setup
@@ -252,6 +261,7 @@ class VirtualDevice:
             self._state[obj.path] = restored
 
         self.fault_state = saved.get("faults", {})
+        self.clock.load(saved.get("clock"))
         self.boot_count = saved.get("boot_count", 0)
         self.reboot_cause = saved.get("reboot_cause", "FactoryReset")
         self.sdcard_inserted = bool(saved.get("sdcard_inserted", False))
@@ -280,6 +290,7 @@ class VirtualDevice:
                 "reboot_cause": self.reboot_cause,
                 "sdcard_inserted": self.sdcard_inserted,
                 "faults": self.fault_state,
+                "clock": self.clock.to_json(),
             }
 
         try:
@@ -327,6 +338,43 @@ class VirtualDevice:
 
     def set_boot_probe(self, probe: Callable[[], int]) -> None:
         self._recent_boots = probe
+
+    # ------------------------------------------------------------------
+    # Lab clock
+    # ------------------------------------------------------------------
+
+    def adjust_clock(self, jump: Optional[float] = None, rate: Optional[float] = None) -> dict:
+        """Jumps the clock and/or changes its rate, for the device and the firmware."""
+        with self._lock:
+            snapshot = self.clock.adjust(jump=jump, rate=rate)
+            self.persist()
+        self._clock_changed()
+        return snapshot
+
+    def reset_clock(self) -> dict:
+        with self._lock:
+            snapshot = self.clock.reset()
+            self.persist()
+        self._clock_changed()
+        return snapshot
+
+    def sync_clock(self) -> str:
+        """Rewrites the firmware's control file to the clock as it is now.
+
+        Called by the agent's plug-in on its way up, so that a fresh obuspa
+        process anchors to the current lab time rather than to the time of
+        the last change.
+        """
+        with self._lock:
+            return self.clock.write_file()
+
+    def _clock_changed(self) -> None:
+        log.info("lab clock: %s", self.clock.control_string())
+        # The firmware's timers block until their next deadline in real time;
+        # the plug-in turns this into a wake-up of the data-model thread so
+        # that anything now due fires at once.
+        self.emit({"event": "clock", **self.clock.snapshot()})
+        self._notify()
 
     def set_agent_connected(self, connected: bool) -> None:
         with self._lock:
@@ -526,7 +574,7 @@ class VirtualDevice:
                     "rebooting": self.rebooting,
                     "bootCount": self.boot_count,
                     "rebootCause": self.reboot_cause,
-                    "upTime": int(time.time() - self.booted_at),
+                    "upTime": int(self.clock.now() - self.booted_at),
                     "runningJobs": [
                         {"requestId": job.request_id, "path": job.path}
                         for job in self._jobs.values()
@@ -544,6 +592,7 @@ class VirtualDevice:
                     },
                     "bootedFrom": self.booted_from(),
                     "faults": self.faults.list_faults(),
+                    "clock": self.clock.snapshot(),
                     "hal": dict(self.hal),
                     "wan": self.wan.snapshot() if self.wan else None,
                     "agent": {
@@ -935,7 +984,7 @@ class VirtualDevice:
         """Called once the device is serving again after a reboot."""
         with self._lock:
             self.rebooting = False
-            self.booted_at = time.time()
+            self.booted_at = self.clock.now()
 
             # Volatile parameters come up at their defaults, and rows made
             # entirely of volatile state (associated clients) do not come back

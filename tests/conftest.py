@@ -325,6 +325,27 @@ def faults(device_url):
 
 
 @pytest.fixture
+def lab_clock(device_url):
+    """The lab clock; returns the firmware and device to real time on the way out."""
+
+    class Clock:
+        def get(self) -> dict:
+            return requests.get(f"{device_url}/api/clock", timeout=5).json()
+
+        def jump(self, seconds: float) -> dict:
+            return post(device_url, "/api/clock", {"jump": seconds})
+
+        def rate(self, rate: float) -> dict:
+            return post(device_url, "/api/clock", {"rate": rate})
+
+        def reset(self) -> dict:
+            return requests.delete(f"{device_url}/api/clock", timeout=5).json()
+
+    yield Clock()
+    requests.delete(f"{device_url}/api/clock", timeout=5)
+
+
+@pytest.fixture
 def wan_state(device_url):
     return lambda: requests.get(f"{device_url}/api/wan", timeout=5).json()
 

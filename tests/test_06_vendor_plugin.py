@@ -232,7 +232,8 @@ def test_global_disable_idles_every_rule(controller, plugin_booted, attach_clien
 
 
 def test_deleting_the_vendor_rule_removes_the_firewall_rule(controller, plugin_booted,
-                                                            attach_client_api, wait_for_agent):
+                                                            attach_client_api, wait_for_agent,
+                                                            device_url):
     """Removing a row goes through the hardware layer, and the agent survives it."""
     wait_for_agent(timeout=60)
     mac = "02:00:5e:c0:10:04"
@@ -248,7 +249,7 @@ def test_deleting_the_vendor_rule_removes_the_firewall_rule(controller, plugin_b
     _settle()
     assert int(controller.get_one(FW_COUNT)) == baseline
     assert controller.get_one(path) == "true"
-    assert system_state("http://localhost:8080")["agent"]["eventsConnected"] is True
+    assert system_state(device_url)["agent"]["eventsConnected"] is True
 
 
 def test_vendor_rules_survive_a_reboot_and_relink(controller, plugin_booted, attach_client_api,

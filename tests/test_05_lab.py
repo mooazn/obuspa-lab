@@ -6,6 +6,7 @@ test_06_vendor_plugin.py so they run last.
 
 from __future__ import annotations
 
+import calendar
 import time
 
 import pytest
@@ -37,13 +38,13 @@ def test_console_captures_agent_boot(controller, console):
                for text in this_boot), this_boot[:40]
 
 
-def test_console_is_incremental(controller, console):
+def test_console_is_incremental(controller, console, device_url):
     """`since` returns only newer lines, so a UI can poll without duplicates.
 
     The console never goes quiet (obuspa's protocol trace logs keepalives), so
     the property is "everything returned is newer", not "nothing is returned".
     """
-    latest = requests.get("http://localhost:8080/api/console", timeout=5).json()["latest"]
+    latest = requests.get(f"{device_url}/api/console", timeout=5).json()["latest"]
     newer = console(since=latest)
     assert all(entry["seq"] > latest for entry in newer)
     assert all(entry["seq"] > latest for entry in console(since=latest))
@@ -61,9 +62,9 @@ def test_agent_reported_connected(controller, device_url):
 # ----------------------------------------------------------------------
 
 
-def test_usp_timeline_records_request_and_response(controller, usp_timeline):
+def test_usp_timeline_records_request_and_response(controller, usp_timeline, device_url):
     """The tap sees both halves of a transaction, correlated by msg_id."""
-    latest = requests.get("http://localhost:8080/api/usp/timeline", timeout=5).json()["latest"]
+    latest = requests.get(f"{device_url}/api/usp/timeline", timeout=5).json()["latest"]
 
     controller.get_one("Device.WiFi.SSID.1.SSID")
     time.sleep(0.5)
@@ -219,3 +220,77 @@ def test_hal_survives_a_reboot(hal, reboot_and_wait):
     hal.put("board.revision", "B2")
     reboot_and_wait()
     assert hal.get("board.revision") == "B2"
+
+
+# ---------------------------------------------------------------- lab clock
+
+def _agent_time(controller) -> float:
+    """Device.Time.CurrentLocalTime as the agent reports it, in epoch seconds."""
+    text = controller.get_one("Device.Time.CurrentLocalTime")
+    return calendar.timegm(time.strptime(text[:19], "%Y-%m-%dT%H:%M:%S"))
+
+
+def test_clock_jump_moves_firmware_and_device_together(controller, lab_clock, device_url):
+    before = _agent_time(controller)
+    assert abs(before - time.time()) < 5, "the agent starts on real time"
+
+    lab_clock.jump(3600)
+    agent = _agent_time(controller)
+    device = lab_clock.get()
+    assert abs(agent - (time.time() + 3600)) < 5
+    assert abs(agent - device["now"]) < 3
+    assert device["offset"] == pytest.approx(3600, abs=2) and not device["real"]
+    assert system_state(device_url)["clock"]["offset"] == pytest.approx(3600, abs=2)
+
+    lab_clock.reset()
+    assert abs(_agent_time(controller) - time.time()) < 5
+
+
+def test_clock_jump_fires_timers_that_become_due(controller, lab_clock):
+    """An hour-long schedule completes the moment the clock passes it.
+
+    The agent's timer loop sleeps until its next deadline in real time; the
+    clock change has to wake it, or the jump would only be noticed at the
+    next unrelated activity.
+    """
+    interval = "Device.LocalAgent.Controller.1.PeriodicNotifInterval"
+    original = controller.get_one(interval)
+    controller.subscribe("Event", "Device.LocalAgent.Periodic!")
+    try:
+        controller.set({interval: 3600})
+        started = time.time()
+        lab_clock.jump(3600)
+        controller.wait_for_notification(
+            lambda n: n["type"] == "event" and n["event_name"] == "Periodic!", timeout=10
+        )
+        assert time.time() - started < 10
+    finally:
+        controller.set({interval: original})
+
+
+def test_clock_rate_runs_the_firmware_faster(controller, lab_clock):
+    lab_clock.rate(60)
+    start = _agent_time(controller)
+    time.sleep(3)
+    elapsed = _agent_time(controller) - start
+    assert 120 <= elapsed <= 300, f"expected about 180 fake seconds in 3 real seconds, saw {elapsed}"
+
+    # Returning to real rate keeps the clock continuous: no step backwards.
+    lab_clock.rate(1)
+    settled = _agent_time(controller)
+    assert settled >= start + elapsed - 2
+    time.sleep(2)
+    assert 0 <= _agent_time(controller) - settled <= 5
+
+
+def test_clock_rejects_bad_values(device_url):
+    for body in ({}, {"rate": 0}, {"rate": 1000}, {"rate": "fast"}, {"jump": "later"}):
+        assert requests.post(f"{device_url}/api/clock", json=body, timeout=5).status_code == 400, body
+
+
+def test_clock_survives_a_reboot(controller, lab_clock, reboot_and_wait):
+    """The lab clock is an RTC: a reboot does not put the firmware back on real time."""
+    lab_clock.jump(86400)
+    reboot_and_wait()
+    assert abs(_agent_time(controller) - (time.time() + 86400)) < 10
+    assert lab_clock.get()["offset"] == pytest.approx(86400, abs=5)
