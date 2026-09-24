@@ -41,8 +41,11 @@ RUN make -C /usr/local/src/vdev-plugin OBUSPA_SRC=/usr/local/src/obuspa
 
 
 FROM debian:stable-slim
+ARG OBUSPA_VERSION
+# Names the built-in firmware image in Device.DeviceInfo.SoftwareVersion
+ENV VDEV_BUILTIN_IMAGE=${OBUSPA_VERSION}
 RUN apt-get update && apt-get -y install --no-install-recommends \
-        libssl3 libsqlite3-0 libcurl4 libmosquitto1 libcjson1 jq util-linux libfaketime \
+        libssl3 libsqlite3-0 libcurl4 libmosquitto1 libcjson1 jq util-linux libfaketime procps \
     && rm -rf /var/lib/apt/lists/* \
     # The lab clock: obuspa runs under libfaketime so that the device can move
     # the firmware's idea of the time. One architecture-independent path for

@@ -1,4 +1,4 @@
-.PHONY: help venv proto build up dev down logs test clean reset flash eject
+.PHONY: help venv proto build up dev down logs test clean reset flash eject docker-running
 
 PYTHON ?= python3
 VENV   := .venv
@@ -10,6 +10,7 @@ help:
 	@echo "make up      - pull the prebuilt images and start the stack (seconds)"
 	@echo "make dev     - build the images from this tree and start the stack (minutes)"
 	@echo "make test    - run the test suite against a running stack"
+	@echo "              (pytest arguments via ARGS, e.g. make test ARGS=\"-x -k clock\")"
 	@echo "make logs    - follow logs from all services"
 	@echo "make down    - stop the stack (keeps agent database)"
 	@echo "make reset   - stop the stack and factory reset the agent database"
@@ -36,7 +37,13 @@ proto: $(VENV)/bin/activate
 # the same compose project, so down/logs/reset apply to either.
 COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-up:
+# Fails early and plainly when the Docker daemon is not reachable, instead of
+# surfacing as a pull or socket error further in
+docker-running:
+	@docker info >/dev/null 2>&1 || { \
+	  echo "cannot reach the Docker daemon - is Docker running?"; exit 1; }
+
+up: docker-running
 	@docker compose pull --quiet || { \
 	  echo; echo "could not pull the prebuilt images (not published yet, or private?)"; \
 	  echo "build them from this tree instead:  make dev"; exit 1; }
@@ -46,7 +53,7 @@ up:
 	@echo "broker:  localhost:1883"
 	@echo "watch:   make logs      (editing the source? use: make dev)"
 
-dev:
+dev: docker-running
 	$(COMPOSE_DEV) up -d --build
 	@echo
 	@echo "web UI:  http://localhost:8080   (built from this tree)"
@@ -63,8 +70,9 @@ reset:
 logs:
 	docker compose logs -f
 
+# Extra pytest arguments, e.g. make test ARGS="-x -k clock"
 test: venv
-	$(VENV)/bin/pytest tests/ -v
+	$(VENV)/bin/pytest tests/ -v $(ARGS)
 
 clean:
 	rm -rf $(VENV) controller/uspctl/proto/*_pb2.py
@@ -75,7 +83,7 @@ clean:
 FLASH_ARGS := $(if $(SRC),--src "$(SRC)") $(if $(REF),--ref "$(REF)") \
               $(foreach p,$(PLUGINS),--plugin "$(p)") $(if $(LABEL),--label "$(LABEL)")
 
-flash:
+flash: docker-running
 	@if [ -z "$(SRC)$(REF)$(PLUGINS)" ]; then \
 	  echo "usage: make flash [SRC=<obuspa checkout> | REF=<git ref>] [PLUGINS=\"dir ...\"] [LABEL=name]"; exit 2; fi
 	./scripts/flash.sh $(FLASH_ARGS)

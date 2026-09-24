@@ -121,6 +121,7 @@ static int VdevAsyncRestart(dm_req_t *req, int instance, bool *is_restart, int *
                             char *err_msg, int err_msg_len, kv_vector_t *output_args);
 static int VdevReboot(void);
 static int VdevFactoryReset(void);
+static int VdevGetSoftwareVersion(char *buf, int len);
 
 static const char *SockPath(void);
 static cJSON *Rpc(cJSON *request);
@@ -942,6 +943,7 @@ int VENDOR_Init(void)
     memset(&core_callbacks, 0, sizeof(core_callbacks));
     core_callbacks.reboot_cb = VdevReboot;
     core_callbacks.factory_reset_cb = VdevFactoryReset;
+    core_callbacks.get_active_software_version_cb = VdevGetSoftwareVersion;
     err |= USP_REGISTER_CoreVendorHooks(&core_callbacks);
 
     cJSON_Delete(response);
@@ -955,6 +957,23 @@ int VENDOR_Init(void)
     VDEV_LOG_Info("%s: registered %d proxied data model entries from %s", __FUNCTION__, count, SockPath());
 
     SyncClock();
+    return USP_ERR_OK;
+}
+
+/*********************************************************************//**
+**
+** VdevGetSoftwareVersion
+**
+** Serves Device.DeviceInfo.SoftwareVersion: the identity of the firmware image
+** that booted, as named by the bootloader (agent/entrypoint.sh). obuspa also
+** compares it across boots to set Boot!'s FirmwareUpdated argument.
+**
+**************************************************************************/
+static int VdevGetSoftwareVersion(char *buf, int len)
+{
+    const char *image = getenv("VDEV_SOFTWARE_VERSION");
+
+    snprintf(buf, len, "%s", (image != NULL) ? image : "");
     return USP_ERR_OK;
 }
 

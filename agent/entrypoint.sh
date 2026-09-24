@@ -115,8 +115,22 @@ MANIFEST=null
 if [ "$CARD_SEATED" = true ] && [ -f "$SDCARD/manifest.json" ]; then
     MANIFEST="$(cat "$SDCARD/manifest.json")"
 fi
-printf '{"from":"%s","binary":"%s","cardSeated":%s,"plugins":[%s],"manifest":%s,"bootedAt":"%s"}\n' \
-    "$BOOT_FROM" "$BIN" "$CARD_SEATED" "$PLUGIN_LIST" "$MANIFEST" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+
+# The firmware image's identity, served as Device.DeviceInfo.SoftwareVersion.
+# Distinct from Device.LocalAgent.SoftwareVersion (the obuspa release): two
+# builds of one release are different images. A card image is named by its
+# label and commit; plug-ins on top of the built-in image append the label.
+IMAGE="builtin-${VDEV_BUILTIN_IMAGE:-unknown}"
+CARD_IMAGE="$(printf '%s' "$MANIFEST" | jq -r '[.label, .commit]
+    | map(select(. != null and . != "" and . != "unknown")) | join("-")' 2>/dev/null)"
+case "$BOOT_FROM" in
+    sdcard)   IMAGE="${CARD_IMAGE:-card}" ;;
+    internal) [ -n "$PLUGIN_LIST" ] && IMAGE="$IMAGE+$(printf '%s' "$MANIFEST" | jq -r '.label // "card"')" ;;
+esac
+export VDEV_SOFTWARE_VERSION="$IMAGE"
+
+printf '{"from":"%s","binary":"%s","cardSeated":%s,"plugins":[%s],"manifest":%s,"softwareVersion":"%s","bootedAt":"%s"}\n' \
+    "$BOOT_FROM" "$BIN" "$CARD_SEATED" "$PLUGIN_LIST" "$MANIFEST" "$IMAGE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     > "$RUN_DIR/booted-from.json"
 
 /usr/local/bin/faultd.sh apply-once

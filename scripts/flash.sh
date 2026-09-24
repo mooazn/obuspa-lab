@@ -58,7 +58,10 @@ if [ -n "$SRC" ]; then
     [ -f "$SRC/configure.ac" ] || { echo "flash: $SRC does not look like an obuspa tree" >&2; exit 1; }
     COMMIT="$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then DIRTY="-dirty"; fi
-    VERSION="$(sed -n 's/^AC_INIT(\[[^]]*\],\[\([^]]*\)\].*/\1/p' "$SRC/configure.ac" | head -1)"
+    # The release obuspa reports as Device.LocalAgent.SoftwareVersion. AC_INIT
+    # in configure.ac is not maintained upstream (it stays at 1.0.0).
+    VERSION="$(sed -n 's/^#define AGENT_SOFTWARE_VERSION *"\([^"]*\)".*/\1/p' "$SRC/src/core/version.h" 2>/dev/null | head -1)"
+    [ -n "$VERSION" ] || VERSION="$(sed -n 's/^AC_INIT(\[[^]]*\],\[\([^]]*\)\].*/\1/p' "$SRC/configure.ac" | head -1)"
     TARGET=card
 else
     SRC="$TMP/no-obuspa"; mkdir -p "$SRC"       # unused context, must still exist
