@@ -247,6 +247,12 @@ its time, and a factory reset does not touch it. The rate is capped at 60:
 the controller and the broker are on real time, so a fast firmware pings
 and retries more often than they expect.
 
+libfaketime's time functions hold a lock (the multithreaded build, which
+the clock needs to stay correct under concurrent callers). A process that
+forks while another of its threads is reading the time leaves the child
+holding that lock, so a child that reads the time before `exec` hangs.
+Children that go straight to `exec`, as obuspa's own do, are unaffected.
+
 ### Through the virtual HAL (opt-in)
 
 The HAL is the escape hatch for what the data model does not cover: reading

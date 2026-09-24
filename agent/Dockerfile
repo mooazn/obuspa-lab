@@ -48,9 +48,12 @@ RUN apt-get update && apt-get -y install --no-install-recommends \
         libssl3 libsqlite3-0 libcurl4 libmosquitto1 libcjson1 jq util-linux libfaketime procps \
     && rm -rf /var/lib/apt/lists/* \
     # The lab clock: obuspa runs under libfaketime so that the device can move
-    # the firmware's idea of the time. One architecture-independent path for
-    # the entrypoint to preload.
-    && ln -s "$(dpkg -L libfaketime | grep 'libfaketime.so.1$')" /usr/local/lib/libfaketime.so.1
+    # the firmware's idea of the time. The MT build serialises libfaketime's
+    # time functions; the default build re-reads the control file into shared
+    # buffers unlocked, and concurrent callers can make an unchanged setting
+    # look changed, re-anchoring the clock. One architecture-independent path
+    # for the entrypoint to preload.
+    && ln -s "$(dpkg -L libfaketime | grep 'libfaketimeMT.so.1$')" /usr/local/lib/libfaketimeMT.so.1
 
 COPY --from=build-stage /usr/local/lib/libwebsockets.so* /usr/local/lib/
 COPY --from=build-stage /usr/local/bin/obuspa /usr/local/bin/obuspa
