@@ -262,15 +262,25 @@ def restore_radios(controller):
     )
 
 
+def boot_builtin(device_url: str, wait_for_agent) -> None:
+    """Ejects the card and, if the running agent booted with it, reboots.
+
+    Ejecting alone leaves the flashed image running until the next reset, so
+    a later test run would silently exercise the card's build.
+    """
+    if system_state(device_url)["sdcard"]["inserted"]:
+        post(device_url, "/api/sdcard", {"action": "eject"})
+    booted = system_state(device_url)["bootedFrom"]
+    if booted.get("cardSeated"):
+        post(device_url, "/api/reboot", {"cause": "LocalReboot"})
+        wait_for_agent(timeout=150, previous_boot=booted.get("bootedAt", ""))
+
+
 @pytest.fixture
 def card_ejected(device_url, wait_for_agent):
     """Whatever happens, boot the built-in image again afterwards."""
     yield
-    if system_state(device_url)["sdcard"]["inserted"]:
-        post(device_url, "/api/sdcard", {"action": "eject"})
-        marker = system_state(device_url)["bootedFrom"].get("bootedAt", "")
-        post(device_url, "/api/reboot", {"cause": "LocalReboot"})
-        wait_for_agent(timeout=120, previous_boot=marker)
+    boot_builtin(device_url, wait_for_agent)
 
 
 @pytest.fixture
@@ -386,7 +396,7 @@ def usp_timeline(device_url):
 
 
 @pytest.fixture(scope="module")
-def flashed_plugin_card(device_url):
+def flashed_plugin_card(device_url, wait_for_agent):
     """Flashes the example plug-ins onto the card for the duration of a module.
 
     The developer's card is backed up first and restored afterwards, so the
@@ -435,9 +445,8 @@ def flashed_plugin_card(device_url):
 
     yield manifest
 
-    # Eject if we left it seated, then restore whatever was on the card
-    if system_state(device_url)["sdcard"]["inserted"]:
-        post(device_url, "/api/sdcard", {"action": "eject"})
+    # Back on the built-in image, then restore whatever was on the card
+    boot_builtin(device_url, wait_for_agent)
     for name in ("obuspa", "vdev_plugin.so", "manifest.json", "plugins"):
         target = card / name
         if target.is_dir():

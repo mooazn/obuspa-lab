@@ -76,6 +76,13 @@ boots the card's `obuspa` if present, else the built-in; and loads every
 The "booted from" tag in the 3D view and `GET /api/state` → `system.bootedFrom`
 say what actually ran.
 
+Over USP, `Device.DeviceInfo.SoftwareVersion` names the image that booted:
+`<label>-<commit>` for a card's obuspa, `builtin-<release>` for the built-in
+one, `builtin-<release>+<label>` for plug-ins on top of it.
+`Device.LocalAgent.SoftwareVersion` stays the obuspa release. Booting a
+different image than last time sets `FirmwareUpdated` in `Boot!`, as a
+firmware update would on hardware.
+
 ---
 
 ## 2. The plug-in contract

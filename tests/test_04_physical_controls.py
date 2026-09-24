@@ -179,10 +179,15 @@ def test_booting_from_card_runs_the_flashed_agent(controller, device_url, flashe
     """The loop that used to need a card reader and a screwdriver.
 
     Seat the card, press reset, and the agent that comes back is the build on
-    the card - provable because it is a different obuspa release with a
-    different SoftwareVersion, not just a re-run of the same binary.
+    the card: the bootloader ran the binary it copied off the card, and the
+    firmware reports the card's image as its software version. The obuspa
+    release may be the same as the built-in one, so it proves nothing here.
     """
-    builtin_version = controller.get_one("Device.LocalAgent.SoftwareVersion")
+    builtin_image = controller.get_one("Device.DeviceInfo.SoftwareVersion")
+
+    # Its own persistent Boot! subscription: the session-wide one does not
+    # survive the factory reset test earlier in this module.
+    boot_sub = controller.subscribe("Event", "Device.Boot!", persistent=True)
 
     _post(device_url, "/api/sdcard", {"action": "insert"})
     assert _system(device_url)["sdcard"]["inserted"]
@@ -193,12 +198,20 @@ def test_booting_from_card_runs_the_flashed_agent(controller, device_url, flashe
 
     booted = _system(device_url)["bootedFrom"]
     assert booted["from"] == "sdcard", booted
+    assert booted["binary"] == "/tmp/sdboot/obuspa", booted
     assert booted["manifest"]["label"] == flashed_card["label"]
 
-    card_version = controller.get_one("Device.LocalAgent.SoftwareVersion")
-    assert card_version != builtin_version, (
-        f"agent still reports the built-in version {builtin_version}"
+    card_image = controller.get_one("Device.DeviceInfo.SoftwareVersion")
+    assert card_image == booted["softwareVersion"]
+    assert card_image.startswith(flashed_card["label"])
+    assert card_image != builtin_image
+
+    # A different image than the last boot is a firmware update to obuspa
+    boot = controller.wait_for_notification(
+        lambda n: n["subscription_id"] == boot_sub and n.get("event_name") == "Boot!",
+        timeout=30,
     )
+    assert boot["params"]["FirmwareUpdated"] == "true", boot["params"]
 
     # The flashed build serves the same data model through the same plug-in
     assert controller.get_one("Device.WiFi.SSID.1.SSID") == "VirtualGateway-001"
@@ -210,4 +223,4 @@ def test_booting_from_card_runs_the_flashed_agent(controller, device_url, flashe
     wait_for_agent(timeout=120, previous_boot=marker)
 
     assert _system(device_url)["bootedFrom"]["from"] == "internal"
-    assert controller.get_one("Device.LocalAgent.SoftwareVersion") == builtin_version
+    assert controller.get_one("Device.DeviceInfo.SoftwareVersion") == builtin_image
