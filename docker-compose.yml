@@ -8,6 +8,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build   # from source
 #
 # VDEV_IMAGE_PREFIX and VDEV_IMAGE_TAG select a different registry or tag.
+# VDEV_HTTP_HOST_PORT publishes the web UI on another host port (default 8080).
 #
 # The agent and the device share /run/vdev so the plug-in can reach the device's
 # Unix socket. That volume also holds the agent's sqlite database, so
@@ -37,7 +38,8 @@ services:
       broker:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      # VDEV_HTTP_HOST_PORT moves the web UI and API on the host
+      - "${VDEV_HTTP_HOST_PORT:-8080}:8080"
     volumes:
       - vdev-run:/run/vdev
       - ./sdcard:/sdcard:ro

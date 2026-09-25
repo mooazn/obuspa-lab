@@ -64,7 +64,7 @@ def test_disk_monitor_raises_space_low(controller, plugin_booted, faults, wait_f
     faults.wait_applied("disk_fill")
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "SpaceLow!", timeout=30)
+        lambda n: n["type"] == "Event" and n.get("event_name") == "SpaceLow!", timeout=30)
     assert int(notification["params"]["UsedPercent"]) >= 90
     assert notification["params"]["Threshold"] == "90"
     assert notification["params"]["Path"] == "/data"
@@ -96,7 +96,7 @@ def test_disk_monitor_threshold_from_hal(controller, plugin_booted, faults, hal,
     faults.wait_applied("disk_fill")
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "SpaceLow!", timeout=30)
+        lambda n: n["type"] == "Event" and n.get("event_name") == "SpaceLow!", timeout=30)
     assert notification["params"]["Threshold"] == "50"
     assert 55 <= int(notification["params"]["UsedPercent"]) <= 70
 
@@ -112,7 +112,7 @@ def test_disk_monitor_survives_reboot_and_alarms_again(controller, plugin_booted
     reboot_and_wait()
 
     controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "SpaceLow!", timeout=60)
+        lambda n: n["type"] == "Event" and n.get("event_name") == "SpaceLow!", timeout=60)
 
 
 # ----------------------------------------------------------------------
@@ -175,7 +175,7 @@ def test_vendor_rule_creates_a_firewall_rule_and_blocks_the_client(
     rule = pc_rule(MACAddress=mac, Description="bedtime")
 
     applied = controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "RuleApplied!", timeout=15)
+        lambda n: n["type"] == "Event" and n.get("event_name") == "RuleApplied!", timeout=15)
     assert applied["params"]["MACAddress"] == mac
 
     assert int(controller.get_one(FW_COUNT)) == baseline + 1

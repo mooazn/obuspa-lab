@@ -75,6 +75,8 @@ the first build compiles obuspa from source and takes a few minutes.
 
 Open <http://localhost:8080>. Drag to orbit the device; change the SSID in
 the tree and read it back over USP; press reset and watch it boot.
+If 8080 is taken on your machine, `make up VDEV_HTTP_HOST_PORT=8081` (and
+the same variable for `make dev` and `make test`) moves it.
 
 `make down` stops the stack; `make reset` also wipes the agent database — a
 factory reset.

@@ -65,7 +65,7 @@ def test_sim_insertion_is_pushed_as_object_creation(controller, device_url, no_s
     _post(device_url, "/api/sim", {"action": "insert"})
 
     controller.wait_for_notification(
-        lambda n: n["type"] == "obj_creation"
+        lambda n: n["type"] == "ObjectCreation"
         and n.get("obj_path", "").startswith("Device.Cellular.AccessPoint."),
         timeout=20,
     )
@@ -107,7 +107,7 @@ def test_reset_button_really_restarts_the_agent(controller, device_url, boot_sub
     _post(device_url, "/api/reboot", {"cause": "LocalReboot"})
 
     controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "Boot!",
+        lambda n: n["type"] == "Event" and n.get("event_name") == "Boot!",
         timeout=90,
     )
     wait_for_agent(timeout=90, previous_boot=marker)

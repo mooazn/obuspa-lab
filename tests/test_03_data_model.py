@@ -178,7 +178,7 @@ def test_client_arrival_is_pushed_as_object_creation(controller, attach_client_a
     attach_client_api(1, mac="02:00:5e:aa:00:31", hostname="arriving")
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "obj_creation"
+        lambda n: n["type"] == "ObjectCreation"
         and n.get("obj_path", "").startswith(f"{AP1}.AssociatedDevice."),
         timeout=20,
     )
