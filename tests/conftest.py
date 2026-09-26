@@ -2,7 +2,8 @@
 
 Tests talk to the stack from the host: MQTT on localhost:1883 (as a USP
 controller) and the device's HTTP API on localhost:8080 (as the web UI does).
-Bring the stack up with `make up` first.
+Bring the stack up with `make up` first. VDEV_HTTP_HOST_PORT follows a stack
+published on another port; VDEV_DEVICE_URL overrides the URL outright.
 """
 
 from __future__ import annotations
@@ -22,7 +23,9 @@ from uspctl import UspController  # noqa: E402
 
 BROKER_HOST = os.environ.get("VDEV_BROKER_HOST", "localhost")
 BROKER_PORT = int(os.environ.get("VDEV_BROKER_PORT", "1883"))
-DEVICE_URL = os.environ.get("VDEV_DEVICE_URL", "http://localhost:8080")
+DEVICE_URL = os.environ.get(
+    "VDEV_DEVICE_URL", f"http://localhost:{os.environ.get('VDEV_HTTP_HOST_PORT', '8080')}"
+)
 
 # The agent needs a moment after the broker is up before it answers USP
 AGENT_READY_TIMEOUT = float(os.environ.get("VDEV_AGENT_TIMEOUT", "60"))

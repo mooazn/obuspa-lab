@@ -58,7 +58,7 @@ def test_async_command_completes_via_notification(controller, oper_subscription)
     assert started == {}
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "oper_complete" and n.get("command_key") == command_key,
+        lambda n: n["type"] == "OperationComplete" and n.get("command_key") == command_key,
         timeout=30,
     )
 
@@ -78,7 +78,7 @@ def test_async_command_reports_device_level_failure(controller, oper_subscriptio
                        command_key=command_key)
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "oper_complete" and n.get("command_key") == command_key,
+        lambda n: n["type"] == "OperationComplete" and n.get("command_key") == command_key,
         timeout=30,
     )
 
@@ -97,7 +97,7 @@ def test_async_command_argument_validation(controller, oper_subscription):
         return      # rejected up front, which is also correct
 
     notification = controller.wait_for_notification(
-        lambda n: n["type"] == "oper_complete" and n.get("command_key") == command_key,
+        lambda n: n["type"] == "OperationComplete" and n.get("command_key") == command_key,
         timeout=30,
     )
     assert notification.get("err_code"), "expected the command to fail"
@@ -138,7 +138,7 @@ def test_reboot_emits_boot_event_and_keeps_config(controller, boot_subscription,
     controller.operate("Device.Reboot()")
 
     controller.wait_for_notification(
-        lambda n: n["type"] == "event" and n.get("event_name") == "Boot!",
+        lambda n: n["type"] == "Event" and n.get("event_name") == "Boot!",
         timeout=90,
     )
 

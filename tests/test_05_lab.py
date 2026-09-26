@@ -261,7 +261,7 @@ def test_clock_jump_fires_timers_that_become_due(controller, lab_clock):
         started = time.time()
         lab_clock.jump(3600)
         controller.wait_for_notification(
-            lambda n: n["type"] == "event" and n["event_name"] == "Periodic!", timeout=10
+            lambda n: n["type"] == "Event" and n["event_name"] == "Periodic!", timeout=10
         )
         assert time.time() - started < 10
     finally:

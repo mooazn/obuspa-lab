@@ -28,6 +28,18 @@ from .proto import usp_record_pb2 as record
 log = logging.getLogger(__name__)
 
 
+# USP's NotifType names, keyed by the Notify message's oneof field, so that a
+# notification's `type` matches what was passed to `subscribe`
+NOTIF_TYPES = {
+    "event": "Event",
+    "value_change": "ValueChange",
+    "oper_complete": "OperationComplete",
+    "obj_creation": "ObjectCreation",
+    "obj_deletion": "ObjectDeletion",
+    "on_board_req": "OnBoardRequest",
+}
+
+
 class UspError(Exception):
     """A USP Error message came back instead of a response."""
 
@@ -163,7 +175,7 @@ class UspController:
         kind = notify.WhichOneof("notification")
 
         record_entry: dict = {
-            "type": kind,
+            "type": NOTIF_TYPES.get(kind, kind),
             "subscription_id": notify.subscription_id,
             "msg_id": msg.header.msg_id,
         }
@@ -221,6 +233,12 @@ class UspController:
         self, match: Callable[[dict], bool], timeout: Optional[float] = None
     ) -> dict:
         """Blocks until a notification satisfying `match` has arrived.
+
+        Each notification is a dict whose `type` is the NotifType it was
+        subscribed with (Event, ValueChange, OperationComplete,
+        ObjectCreation, ObjectDeletion), plus the fields of that type:
+        `obj_path`/`event_name`/`params` for an Event, `command_key` and
+        `output_args` or `err_code` for an OperationComplete, and so on.
 
         Notifications already received are considered, so there is no race
         between triggering something and starting to wait for it.

@@ -33,6 +33,11 @@ venv: $(VENV)/bin/activate proto
 proto: $(VENV)/bin/activate
 	@PYTHON=$(PY) ./scripts/gen_proto.sh
 
+# Host port for the web UI and API. Exported so that compose publishes on it
+# and the test suite targets it: make up VDEV_HTTP_HOST_PORT=8081
+VDEV_HTTP_HOST_PORT ?= 8080
+export VDEV_HTTP_HOST_PORT
+
 # `up` pulls the published images; `dev` builds them from this tree. Both use
 # the same compose project, so down/logs/reset apply to either.
 COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
@@ -49,14 +54,14 @@ up: docker-running
 	  echo "build them from this tree instead:  make dev"; exit 1; }
 	docker compose up -d
 	@echo
-	@echo "web UI:  http://localhost:8080"
+	@echo "web UI:  http://localhost:$(VDEV_HTTP_HOST_PORT)"
 	@echo "broker:  localhost:1883"
 	@echo "watch:   make logs      (editing the source? use: make dev)"
 
 dev: docker-running
 	$(COMPOSE_DEV) up -d --build
 	@echo
-	@echo "web UI:  http://localhost:8080   (built from this tree)"
+	@echo "web UI:  http://localhost:$(VDEV_HTTP_HOST_PORT)   (built from this tree)"
 
 build:
 	$(COMPOSE_DEV) build
