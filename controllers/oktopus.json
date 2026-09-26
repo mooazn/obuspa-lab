@@ -1,0 +1,8 @@
+{
+  "name": "oktopus",
+  "description": "Oktopus (github.com/OktopUSP/oktopus), run by `make oktopus`. Its broker joins the lab network as controller-broker; the agent reaches it through the device's second WAN route, mosquitto:1884.",
+  "endpointId": "oktopusController",
+  "broker": {"address": "mosquitto", "port": 1884},
+  "controllerTopic": "oktopus/usp/v1/controller",
+  "role": "Device.LocalAgent.ControllerTrust.Role.1"
+}

@@ -34,6 +34,7 @@ services:
     networks:
       default:
         aliases: [mosquitto]
+      vdev-lab: {}
     depends_on:
       broker:
         condition: service_healthy
@@ -49,6 +50,10 @@ services:
       VDEV_BROKER_HOST: broker
       VDEV_BROKER_PORT: "1883"
       VDEV_WAN_PORT: "1883"
+      # A second WAN route, to another controller's broker: whatever joins the
+      # vdev-lab network with the alias controller-broker (`make oktopus` does).
+      # The agent reaches it at mosquitto:1884; WAN faults apply to both routes.
+      VDEV_WAN_EXTRA_ROUTES: "1884=controller-broker:1883"
       VDEV_STATE_FILE: /run/vdev/device-state.json
       VDEV_SDCARD_DIR: /sdcard
       VDEV_DATA_PATH: ${VDEV_DATA_PATH:-/data}
@@ -94,3 +99,10 @@ services:
 
 volumes:
   vdev-run:
+
+networks:
+  # The device's outside world beyond the lab's own broker: a controller run as
+  # its own compose project attaches its broker here (oktopus/compose.override.yml).
+  # Only the device joins it, as only the device has a WAN port.
+  vdev-lab:
+    name: vdev-lab

@@ -358,16 +358,20 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None, lab=Non
     # The lab controller (Controller.2): the Browse view's requests to the
     # agent. Agent errors come back verbatim with their USP error code.
 
-    async def lab_call(method: str, *args):
+    async def lab_call_with(function, *args):
+        """Runs a blocking call that talks to the agent as the lab controller."""
         from .labctl import LabControllerError
         if lab is None:
             raise HTTPException(status_code=503, detail="lab controller not running")
         try:
-            return await asyncio.to_thread(getattr(lab, method), *args)
+            return await asyncio.to_thread(function, *args)
         except LabControllerError as exc:
             raise HTTPException(status_code=exc.status, detail={
                 "message": str(exc), "code": exc.code, "paramErrors": exc.param_errors,
             }) from exc
+
+    async def lab_call(method: str, *args):
+        return await lab_call_with(getattr(lab, method) if lab else None, *args)
 
     @app.post("/api/usp/get")
     async def usp_get(body: dict) -> dict:
@@ -413,6 +417,29 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None, lab=Non
         if not isinstance(command, str) or not command.endswith(")") or not isinstance(inputs, dict):
             raise HTTPException(status_code=400, detail="command must end in (); inputs must be an object")
         return {"output": await lab_call("operate", command, inputs)}
+
+    # Other controllers, plugged into the agent at runtime (see controllers.py)
+
+    @app.get("/api/controllers")
+    async def list_controllers() -> dict:
+        from .controllers import ControllerPlugs
+        return {"controllers": await lab_call_with(ControllerPlugs(lab).list) if lab else []}
+
+    @app.post("/api/controllers")
+    async def plug_controller(body: dict) -> dict:
+        from .controllers import ControllerPlugs, validate
+        try:
+            validate(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"controller": await lab_call_with(ControllerPlugs(lab).plug, body)}
+
+    @app.delete("/api/controllers/{name}")
+    async def unplug_controller(name: str) -> dict:
+        from .controllers import ControllerPlugs
+        if not await lab_call_with(ControllerPlugs(lab).unplug, name):
+            raise HTTPException(status_code=404, detail=f"no controller plugged in as {name}")
+        return {"ok": True}
 
     @app.websocket("/ws/usp")
     async def usp_ws(ws: WebSocket) -> None:

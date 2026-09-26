@@ -1,4 +1,4 @@
-.PHONY: help venv proto build up dev down logs test clean reset flash eject docker-running
+.PHONY: help venv proto build up dev down logs test clean reset flash eject docker-running oktopus oktopus-down
 
 PYTHON ?= python3
 VENV   := .venv
@@ -19,6 +19,8 @@ help:
 	@echo "make flash PLUGINS=\"examples/disk-monitor\" - your plug-in(s), against the built-in obuspa"
 	@echo "                               (combine with SRC/REF to build them against that tree)"
 	@echo "make eject   - wipe the SD card"
+	@echo "make oktopus - run the Oktopus controller next to the lab and plug it in"
+	@echo "make oktopus-down - unplug and stop it"
 	@echo
 	@echo "Bringing your own code: docs/vendor-integration.md"
 
@@ -96,3 +98,11 @@ flash: docker-running
 eject:
 	rm -rf sdcard/obuspa sdcard/vdev_plugin.so sdcard/manifest.json sdcard/plugins
 	@echo "SD card wiped"
+
+# Oktopus, an open source USP controller, as a second controller for the agent
+# (scripts/oktopus.sh, oktopus/compose.override.yml, controllers/oktopus.json)
+oktopus: docker-running
+	@./scripts/oktopus.sh up
+
+oktopus-down: docker-running
+	@./scripts/oktopus.sh down
