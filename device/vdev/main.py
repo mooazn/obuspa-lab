@@ -10,6 +10,7 @@ import uvicorn
 
 from .console import ConsoleTail
 from .core import VirtualDevice
+from .labctl import REPLY_TOPIC as LAB_REPLY_TOPIC, LabController
 from .shim import ShimServer
 from .usptap import UspTap
 from .wan import WanRelay
@@ -55,12 +56,16 @@ async def main() -> None:
     await wan.start()
     fault_watch = asyncio.create_task(device.faults.watch())
 
-    # The lab's protocol analyser, on the broker directly (not via the relay)
-    tap = UspTap(os.environ.get("VDEV_BROKER_HOST", "broker"),
-                 int(os.environ.get("VDEV_BROKER_PORT", "1883")))
+    # The lab's protocol analyser and the lab's own controller, both on the
+    # broker directly (not via the relay): they are on the network, not the device
+    broker_host = os.environ.get("VDEV_BROKER_HOST", "broker")
+    broker_port = int(os.environ.get("VDEV_BROKER_PORT", "1883"))
+    tap = UspTap(broker_host, broker_port,
+                 topics=("/usp/agent", "/usp/controller", LAB_REPLY_TOPIC))
     tap.start()
+    lab = LabController(broker_host, broker_port)
 
-    app = create_app(device, shim, console=console, tap=tap)
+    app = create_app(device, shim, console=console, tap=tap, lab=lab)
     config = uvicorn.Config(
         app, host="0.0.0.0", port=http_port, log_level="info", access_log=False
     )
@@ -72,6 +77,7 @@ async def main() -> None:
         await server.serve()
     finally:
         fault_watch.cancel()
+        lab.stop()
         tap.stop()
         await wan.stop()
         await shim.stop()

@@ -294,3 +294,103 @@ def test_clock_survives_a_reboot(controller, lab_clock, reboot_and_wait):
     reboot_and_wait()
     assert abs(_agent_time(controller) - (time.time() + 86400)) < 10
     assert lab_clock.get()["offset"] == pytest.approx(86400, abs=5)
+
+
+# ----------------------------------------------------------------------
+# The lab controller (the USP tab's Browse view)
+# ----------------------------------------------------------------------
+
+LAB = "Device.LocalAgent.Controller.2."
+
+
+def _lab(device_url, op, body):
+    return requests.post(f"{device_url}/api/usp/{op}", json=body, timeout=20)
+
+
+def test_lab_controller_is_provisioned(controller):
+    assert controller.get_one(LAB + "EndpointID") == "self::vdev-lab"
+    assert controller.get_one(LAB + "Enable") == "true"
+
+
+def test_lab_get_reads_the_agent(device_url):
+    response = _lab(device_url, "get", {"path": "Device.LocalAgent.EndpointID"})
+    assert response.status_code == 200, response.text
+    assert response.json()["values"] == {"Device.LocalAgent.EndpointID": "os::vdev-001"}
+
+    shallow = _lab(device_url, "get", {"path": "Device.LocalAgent.", "depth": 1}).json()["values"]
+    assert "Device.LocalAgent.EndpointID" in shallow
+    assert not any(p.startswith("Device.LocalAgent.Controller.") for p in shallow)
+
+
+def test_lab_owns_what_it_creates(device_url, controller):
+    """The agent attributes the lab's rows to Controller.2, not the test suite's."""
+    response = _lab(device_url, "add", {"path": "Device.LocalAgent.Subscription.", "params": {
+        "ID": f"lab-{int(time.time())}", "NotifType": "ValueChange",
+        "ReferenceList": "Device.WiFi.SSID.1.SSID", "Enable": "false"}})
+    assert response.status_code == 200, response.text
+    row = response.json()["path"]
+    try:
+        assert controller.get_one(row + "Recipient") == "Device.LocalAgent.Controller.2"
+    finally:
+        assert _lab(device_url, "delete", {"path": row}).status_code == 200
+    with pytest.raises(Exception):
+        controller.get_one(row + "Recipient")
+
+
+def test_lab_set_round_trips(device_url, controller, restore_ssid):
+    path = "Device.WiFi.SSID.1.SSID"
+    assert _lab(device_url, "set", {"params": {path: "LabBrowse"}}).status_code == 200
+    assert controller.get_one(path) == "LabBrowse"
+
+
+def test_lab_errors_come_back_verbatim(device_url):
+    """The agent's own error code and message, not a paraphrase."""
+    response = _lab(device_url, "set", {"params": {"Device.DeviceInfo.SoftwareVersion": "x"}})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert isinstance(detail["code"], int) and detail["code"] >= 7000
+    assert "SoftwareVersion" in detail["message"] + str(detail["paramErrors"])
+
+    missing = _lab(device_url, "get", {"path": "Device.NoSuchThing."})
+    assert missing.status_code == 400 and missing.json()["detail"]["code"] >= 7000
+
+    assert _lab(device_url, "get", {"path": ""}).status_code == 400
+    assert _lab(device_url, "operate", {"command": "Device.Reboot"}).status_code == 400
+
+
+def test_lab_operate_returns_output(device_url):
+    response = _lab(device_url, "operate", {"command": "Device.WiFi.AccessPoint.1.DisassociateAll()"})
+    assert response.status_code == 200, response.text
+    assert "Disassociated" in response.json()["output"]
+
+
+def test_lab_traffic_is_on_the_timeline(device_url, usp_timeline):
+    since = requests.get(f"{device_url}/api/usp/timeline", timeout=5).json()["latest"]
+    _lab(device_url, "get", {"path": "Device.LocalAgent.EndpointID"})
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        entries = usp_timeline(since=since)
+        if any(e.get("to_id") == "self::vdev-lab" and e.get("msg_type") == "GET_RESP" for e in entries):
+            break
+        time.sleep(0.3)
+    else:
+        pytest.fail(f"no GET_RESP to the lab controller on the timeline: {entries}")
+    assert any(e.get("from_id") == "self::vdev-lab" and e.get("msg_type") == "GET" for e in entries)
+
+
+def test_lab_controller_is_restored_into_an_existing_database(controller, device_url,
+                                                              reboot_and_wait, console):
+    """A database without Controller.2 (one that predates it) gets it at boot.
+
+    Removing the row and rebooting is that situation: the agent keeps its
+    database, and the bootloader has to add the lab controller back.
+    """
+    controller.delete(LAB)
+    with pytest.raises(Exception):
+        controller.get_one(LAB + "EndpointID")
+
+    since = requests.get(f"{device_url}/api/console", timeout=5).json()["latest"]
+    reboot_and_wait()
+    assert controller.get_one(LAB + "EndpointID") == "self::vdev-lab"
+    assert any("adding the lab controller" in line["text"] for line in console(since=since))
+    assert _lab(device_url, "get", {"path": "Device.LocalAgent.EndpointID"}).status_code == 200

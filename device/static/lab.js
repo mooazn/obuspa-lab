@@ -1,5 +1,6 @@
 /*
- * The lab panels under the 3D view: console, USP timeline, faults, HAL.
+ * The lab panels under the 3D view: console, USP timeline and browser,
+ * faults and clock, HAL.
  *
  * Kept separate from index.html, which owns the data model tree. Each panel
  * is a small module-level object with `mount(el)` and optional `onState(s)`;
@@ -316,17 +317,47 @@ const uspPanel = {
   mount(section) {
     const head = el("div", "panel-head");
     this.pill = el("span", "pill", "tap: connecting");
+
+    // Timeline (what crossed the broker) and Browse (ask the agent, as the
+    // lab's own controller)
+    const views = el("div", "seg");
+    this.views = {};
+    for (const [key, label] of [["timeline", "Timeline"], ["browse", "Browse"]]) {
+      const b = el("button", "", label);
+      b.onclick = () => this.show(key);
+      views.appendChild(b);
+      this.views[key] = b;
+    }
+
+    this.timelineTools = el("span", "tools");
     const filter = el("label", "follow");
     const box = document.createElement("input"); box.type = "checkbox";
     box.onchange = () => { this.onlyNotify = box.checked; this.list.classList.toggle("notify-only", this.onlyNotify); };
     filter.append(box, document.createTextNode(" notifications only"));
     const clear = el("button", "ghost", "Clear view");
     clear.onclick = () => { this.list.innerHTML = ""; };
-    head.append(this.pill, el("span", "spacer"), filter, clear);
+    this.timelineTools.append(filter, clear);
+
+    head.append(views, this.pill, el("span", "spacer"), this.timelineTools);
     section.appendChild(head);
     this.list = el("div", "usp");
     section.appendChild(this.list);
+    this.browse = el("div", "browse");
+    browseView.mount(this.browse);
+    section.appendChild(this.browse);
+
+    let view = "timeline";
+    try { view = localStorage.getItem("vdev.uspView") || "timeline"; } catch (e) {}
+    this.show(this.views[view] ? view : "timeline");
     this.connect();
+  },
+
+  show(view) {
+    this.list.hidden = view !== "timeline";
+    this.timelineTools.hidden = view !== "timeline";
+    this.browse.hidden = view !== "browse";
+    for (const [key, b] of Object.entries(this.views)) b.classList.toggle("on", key === view);
+    try { localStorage.setItem("vdev.uspView", view); } catch (e) {}
   },
 
   append(e) {
@@ -356,6 +387,176 @@ const uspPanel = {
     ws.onmessage = (e) => this.append(JSON.parse(e.data));
     ws.onclose = () => { this.pill.textContent = "tap: reconnecting"; this.pill.className = "pill bad"; setTimeout(() => this.connect(), 1500); };
     ws.onerror = () => ws.close();
+  },
+};
+
+// ---------------------------------------------------------------- USP browse
+
+// Requests go to the agent as the lab controller (self::vdev-lab,
+// Controller.2), so the agent can tell them apart from the test suite's.
+async function lab(op, body) {
+  const res = await fetch(`/api/usp/${op}`, { method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = d.detail || {};
+    if (typeof detail === "string") throw new Error(detail);
+    const lines = [(detail.code ? `USP error ${detail.code}: ` : "") + (detail.message || res.statusText)];
+    for (const [path, code, msg] of detail.paramErrors || []) lines.push(`  ${path}: ${code} ${msg}`);
+    throw new Error(lines.join("\n"));
+  }
+  return d;
+}
+
+// "Name=value" per line -> {Name: "value"}
+function parseArgs(text) {
+  const out = {};
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    const i = t.indexOf("=");
+    if (i < 1) throw new Error(`expected Name=value, got "${t}"`);
+    out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+  }
+  return out;
+}
+
+function input(cls, placeholder, value = "") {
+  const i = document.createElement("input");
+  i.className = cls; i.placeholder = placeholder; i.value = value; i.spellcheck = false;
+  return i;
+}
+
+const browseView = {
+  mount(root) {
+    let last = "Device.LocalAgent.";
+    try { last = localStorage.getItem("vdev.browsePath") || last; } catch (e) {}
+
+    // Get
+    const get = el("div", "browse-row");
+    this.path = input("path", "Device.LocalAgent.", last);
+    this.depth = document.createElement("select");
+    for (const [v, label] of [[0, "all levels"], [1, "1 level"], [2, "2 levels"], [3, "3 levels"]]) {
+      const o = document.createElement("option"); o.value = v; o.textContent = label; this.depth.appendChild(o);
+    }
+    const go = el("button", "", "Get");
+    go.onclick = () => this.get();
+    this.path.onkeydown = (e) => { if (e.key === "Enter") this.get(); };
+    get.append(this.path, this.depth, go);
+
+    this.error = el("pre", "browse-error"); this.error.hidden = true;
+    this.note = el("div", "help", "Requests go to the agent as the lab controller, self::vdev-lab " +
+      "(Controller.2). Click a value to set it; the agent decides what is writable.");
+    this.results = el("div", "browse-results");
+
+    // Add and Operate
+    const add = el("div", "card browse-form");
+    this.addPath = input("path", "Device.LocalAgent.Subscription.");
+    this.addArgs = document.createElement("textarea"); this.addArgs.placeholder = "Name=value, one per line (optional)";
+    const addBtn = el("button", "", "Add instance");
+    addBtn.onclick = () => this.add();
+    add.append(el("div", "browse-label", "Add"), this.addPath, this.addArgs, addBtn);
+
+    const op = el("div", "card browse-form");
+    this.command = input("path", "Device.Reboot()");
+    this.opArgs = document.createElement("textarea"); this.opArgs.placeholder = "Name=value, one per line (optional)";
+    const opBtn = el("button", "", "Operate");
+    opBtn.onclick = () => this.operate();
+    this.opOut = el("pre", "browse-out"); this.opOut.hidden = true;
+    op.append(el("div", "browse-label", "Operate"), this.command, this.opArgs, opBtn, this.opOut);
+
+    const forms = el("div", "browse-forms");
+    forms.append(add, op);
+    root.append(get, this.note, this.error, this.results, forms);
+  },
+
+  fail(e) { this.error.textContent = e.message; this.error.hidden = false; },
+  ok() { this.error.hidden = true; },
+
+  async get() {
+    const path = this.path.value.trim();
+    if (!path) return;
+    try { localStorage.setItem("vdev.browsePath", path); } catch (e) {}
+    try {
+      const { values } = await lab("get", { path, depth: Number(this.depth.value) });
+      this.ok();
+      this.render(values);
+    } catch (e) { this.fail(e); }
+  },
+
+  // Parameters grouped by the object they belong to; instances get a Delete
+  render(values) {
+    this.results.innerHTML = "";
+    const paths = Object.keys(values).sort();
+    if (!paths.length) { this.results.appendChild(el("div", "empty", "nothing under that path")); return; }
+    const groups = new Map();
+    for (const p of paths) {
+      const obj = p.slice(0, p.lastIndexOf(".") + 1);
+      if (!groups.has(obj)) groups.set(obj, []);
+      groups.get(obj).push(p);
+    }
+    for (const [obj, params] of groups) {
+      const group = el("div", "browse-group");
+      const head = el("div", "browse-obj");
+      head.append(el("span", "inst", obj), el("span", "spacer"));
+      if (/\.\d+\.$/.test(obj)) {
+        const del = el("button", "ghost", "Delete");
+        del.onclick = () => this.remove(obj);
+        head.appendChild(del);
+      }
+      group.appendChild(head);
+      for (const p of params) {
+        const row = el("div", "browse-param");
+        const value = el("span", "browse-value", values[p]);
+        value.title = "click to set";
+        value.onclick = () => this.edit(value, p, values[p]);
+        row.append(el("span", "browse-name", p.slice(obj.length)), value);
+        group.appendChild(row);
+      }
+      this.results.appendChild(group);
+    }
+  },
+
+  edit(span, path, current) {
+    const box = input("browse-edit", "", current);
+    span.replaceWith(box);
+    box.focus(); box.select();
+    const done = () => box.replaceWith(span);
+    box.onkeydown = async (e) => {
+      if (e.key === "Escape") return done();
+      if (e.key !== "Enter") return;
+      try { await lab("set", { params: { [path]: box.value } }); this.ok(); await this.get(); }
+      catch (err) { this.fail(err); done(); }
+    };
+    box.onblur = done;
+  },
+
+  async add() {
+    try {
+      const params = parseArgs(this.addArgs.value);
+      const { path } = await lab("add", { path: this.addPath.value.trim(), params });
+      this.ok();
+      this.path.value = path;
+      await this.get();
+    } catch (e) { this.fail(e); }
+  },
+
+  async remove(path) {
+    try { await lab("delete", { path }); this.ok(); await this.get(); }
+    catch (e) { this.fail(e); }
+  },
+
+  async operate() {
+    try {
+      const inputs = parseArgs(this.opArgs.value);
+      const { output } = await lab("operate", { command: this.command.value.trim(), inputs });
+      this.ok();
+      const keys = Object.keys(output);
+      this.opOut.textContent = keys.length
+        ? keys.sort().map(k => `${k} = ${output[k]}`).join("\n")
+        : "accepted - an asynchronous command reports on the timeline when it completes";
+      this.opOut.hidden = false;
+    } catch (e) { this.fail(e); }
   },
 };
 

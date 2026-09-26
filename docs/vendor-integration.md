@@ -295,6 +295,16 @@ threshold as if it came from a board's EEPROM.
   agent and controller, decoded: direction, message type, a one-line summary,
   the full body on click. `GET /api/usp/notifications` filters to Notify. This
   is where you watch your alarm leave the device.
+- **USP tab → Browse** — the data model as a controller sees it, including
+  everything the agent serves itself (`LocalAgent`, `PeriodicStatistics`, an
+  object your plug-in registers without touching the device), which the Data
+  model tab cannot show. Get a path to a chosen depth, click a value to Set
+  it, add and delete instances, run a command. Errors are the agent's own,
+  with their USP code. Requests go as the lab's controller, `self::vdev-lab`
+  (`Controller.2`), a different identity from the test suite's
+  (`self::usp-controller`, `Controller.1`), so what you create by hand is
+  owned by, and attributed to, `Controller.2`. The same calls are
+  `POST /api/usp/{get,set,add,delete,operate}`.
 - **Console tab** / `GET /api/console` / `WS /ws/console` — everything the
   agent container prints: bootloader lines, obuspa's log, your plug-in's
   output, the fault daemon. Rotated per boot; boot boundaries are marked.

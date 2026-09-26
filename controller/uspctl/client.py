@@ -72,6 +72,7 @@ class UspController:
         controller_topic: str = "/usp/controller",
         usp_version: str = "1.3",
         timeout: float = 15.0,
+        max_notifications: Optional[int] = None,
     ):
         self.broker_host = broker_host
         self.broker_port = broker_port
@@ -81,6 +82,9 @@ class UspController:
         self.controller_topic = controller_topic
         self.usp_version = usp_version
         self.timeout = timeout
+        # Keeps only the most recent notifications when set, for a long-lived
+        # controller; a test run keeps them all
+        self.max_notifications = max_notifications
 
         self._pending: dict[str, queue.Queue] = {}
         self._lock = threading.Lock()
@@ -207,6 +211,8 @@ class UspController:
 
         with self._notification_event:
             self._notifications.append(record_entry)
+            if self.max_notifications and len(self._notifications) > self.max_notifications:
+                del self._notifications[: -self.max_notifications]
             self._notification_event.notify_all()
 
         if notify.send_resp:

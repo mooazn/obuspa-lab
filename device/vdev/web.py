@@ -36,7 +36,7 @@ def _random_mac() -> str:
     return "02:00:5e:" + ":".join(f"{random.randint(0, 255):02x}" for _ in range(3))
 
 
-def create_app(device: VirtualDevice, shim=None, console=None, tap=None) -> FastAPI:
+def create_app(device: VirtualDevice, shim=None, console=None, tap=None, lab=None) -> FastAPI:
     app = FastAPI(title="Virtual CPE", docs_url="/api/docs")
 
     clients: set[WebSocket] = set()
@@ -354,6 +354,65 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None) -> Fast
         if tap is None:
             return {"notifications": [], "latest": 0}
         return {"notifications": tap.notifications(since=since), "latest": tap.latest_seq}
+
+    # The lab controller (Controller.2): the Browse view's requests to the
+    # agent. Agent errors come back verbatim with their USP error code.
+
+    async def lab_call(method: str, *args):
+        from .labctl import LabControllerError
+        if lab is None:
+            raise HTTPException(status_code=503, detail="lab controller not running")
+        try:
+            return await asyncio.to_thread(getattr(lab, method), *args)
+        except LabControllerError as exc:
+            raise HTTPException(status_code=exc.status, detail={
+                "message": str(exc), "code": exc.code, "paramErrors": exc.param_errors,
+            }) from exc
+
+    @app.post("/api/usp/get")
+    async def usp_get(body: dict) -> dict:
+        """{path, depth}: depth 0 returns everything below the path."""
+        path = body.get("path")
+        if not isinstance(path, str) or not path:
+            raise HTTPException(status_code=400, detail="path is required")
+        depth = body.get("depth", 0)
+        if type(depth) is not int or depth < 0:
+            raise HTTPException(status_code=400, detail="depth must be a non-negative integer")
+        return {"values": await lab_call("get", path, depth)}
+
+    @app.post("/api/usp/set")
+    async def usp_set(body: dict) -> dict:
+        params = body.get("params")
+        if not isinstance(params, dict) or not params:
+            raise HTTPException(status_code=400, detail="params must be a non-empty object")
+        await lab_call("set", params)
+        return {"ok": True}
+
+    @app.post("/api/usp/add")
+    async def usp_add(body: dict) -> dict:
+        path = body.get("path")
+        params = body.get("params") or {}
+        if not isinstance(path, str) or not path or not isinstance(params, dict):
+            raise HTTPException(status_code=400, detail="path is required; params must be an object")
+        return {"path": await lab_call("add", path, params)}
+
+    @app.post("/api/usp/delete")
+    async def usp_delete(body: dict) -> dict:
+        path = body.get("path")
+        if not isinstance(path, str) or not path:
+            raise HTTPException(status_code=400, detail="path is required")
+        await lab_call("delete", path)
+        return {"ok": True}
+
+    @app.post("/api/usp/operate")
+    async def usp_operate(body: dict) -> dict:
+        """Synchronous commands return their output; asynchronous ones return {}
+        and complete later (visible on the timeline)."""
+        command = body.get("command")
+        inputs = body.get("inputs") or {}
+        if not isinstance(command, str) or not command.endswith(")") or not isinstance(inputs, dict):
+            raise HTTPException(status_code=400, detail="command must end in (); inputs must be an object")
+        return {"output": await lab_call("operate", command, inputs)}
 
     @app.websocket("/ws/usp")
     async def usp_ws(ws: WebSocket) -> None:
