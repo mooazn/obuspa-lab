@@ -65,6 +65,25 @@ if [ -f "$RUN_DIR/factory-reset" ]; then
     rm -f "$RUN_DIR/factory-reset"
 fi
 
+# A database created before the lab controller existed lacks Controller.2, and
+# obuspa ignores endpoints it has no Controller row for. Add the rows from the
+# factory file, written directly to the database before obuspa opens it.
+# A fresh database gets them from the factory file in the usual way.
+if [ -f "$DB" ]; then
+    LAB_ID="$("$INTERNAL_BIN" -f "$DB" -c dbget Device.LocalAgent.Controller.2.EndpointID 2>/dev/null \
+        | sed -n 's/^Device.LocalAgent.Controller.2.EndpointID => //p')"
+    if [ -z "$LAB_ID" ]; then
+        log "adding the lab controller (Controller.2) to the existing agent database"
+        grep '^Device\.LocalAgent\.Controller\.2\.' "$RESET_FILE" | while read -r path value; do
+            value="${value#\"}"; value="${value%\"}"
+            "$INTERNAL_BIN" -f "$DB" -c dbset "$path" "$value" >/dev/null 2>&1 \
+                || log "could not set $path in the agent database"
+        done
+    elif [ "$LAB_ID" != "self::vdev-lab" ]; then
+        log "Controller.2 is $LAB_ID, not the lab controller - the web UI's Browse view will get no answers"
+    fi
+fi
+
 # --- 3. choose the image and the plug-ins --------------------------------------
 # Two independent decisions when the card is seated: boot its obuspa binary if
 # it has one, and load its vendor plug-ins if it has any. A card may carry

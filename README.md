@@ -46,8 +46,9 @@ not need a board, a card reader, or a power strip.
   firmware's time or runs it at up to 60×, so a day-long schedule finishes
   in seconds. An opt-in virtual HAL for code that reads hardware a container
   does not have.
-- **Ways to observe it.** A serial console, a decoded USP timeline, and a
-  Python USP controller you can write tests against.
+- **Ways to observe it.** A serial console, a decoded USP timeline, a
+  browser for the agent's data model as a controller sees it, and a Python
+  USP controller you can write tests against.
 
 **Two scenarios it exists for**, each a worked example with tests.
 `examples/disk-monitor/`: a vendor thread does `statvfs()` on `/data`; the

@@ -190,6 +190,31 @@
     height: 460px; overflow: auto; border: 1px solid var(--border); border-radius: 10px;
     background: var(--panel); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; border-radius: 0; padding: 4px 12px; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .panel-head .tools { display: flex; align-items: center; gap: 12px; }
+  .panel-head .tools[hidden] { display: none; }
+  .browse-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .browse input.path, .browse input.browse-edit, .browse textarea, .browse select {
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  .browse input.path { flex: 1 1 240px; min-width: 0; }
+  .browse textarea { width: 100%; min-height: 3.2em; resize: vertical; box-sizing: border-box; }
+  .browse-error { color: var(--down); white-space: pre-wrap; margin: 8px 0; font-size: 13px; }
+  .browse-results { margin: 10px 0; max-height: 420px; overflow: auto; }
+  .browse-group { border-bottom: 1px solid var(--border); padding: 6px 0; }
+  .browse-obj { display: flex; align-items: center; gap: 8px; }
+  .browse-param { display: flex; gap: 12px; padding: 2px 0 2px 16px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .browse-name { color: var(--muted); flex: 0 0 34%; overflow-wrap: anywhere; }
+  .browse-value { flex: 1; cursor: text; overflow-wrap: anywhere; min-height: 1.2em; }
+  .browse-value:hover { background: var(--bg); }
+  .browse input.browse-edit { flex: 1; padding: 1px 6px; }
+  .browse-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .browse-form { display: flex; flex-direction: column; gap: 8px; }
+  .browse-form input.path { flex: none; }
+  .browse-label { font-weight: 600; font-size: 13px; }
+  .browse-out { white-space: pre-wrap; font-size: 13px; margin: 0; }
   .usp-row { border-bottom: 1px solid var(--border); }
   .usp-row.meta { opacity: 0.55; }
   .usp.notify-only .usp-row:not(.notify) { display: none; }
