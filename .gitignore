@@ -18,6 +18,9 @@ sdcard/vdev_plugin.so
 sdcard/manifest.json
 sdcard/plugins/
 
+# Oktopus checkout and its data (make oktopus)
+.oktopus/
+
 # kept locally, not published
 docs/history.md
 docs/design-decisions.md

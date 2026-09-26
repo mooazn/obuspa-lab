@@ -1,0 +1,98 @@
+# Changes to Oktopus's own compose file (deploy/compose/docker-compose.yaml at
+# the commit pinned in scripts/oktopus.sh), applied by `make oktopus`.
+#
+# Oktopus runs as its own compose project, "oktopus". The differences from
+# upstream:
+#   - images pinned: Oktopus's to the same commit (OKTOPUS_TAG); NATS, nginx
+#     and MongoDB to fixed versions (mongo:latest refuses to start on Linux
+#     6.19 and newer, which current Docker Desktop runs)
+#   - no host ports except the web UI: everything is reached through nginx,
+#     and the broker only by the lab, over the vdev-lab network
+#   - the broker joins the lab's network as controller-broker, the upstream of
+#     the device's second WAN route (VDEV_WAN_EXTRA_ROUTES)
+#   - container names prefixed, so they cannot collide with unrelated
+#     containers called "nginx" or "controller"
+#   - an nginx config that routes by service name and carries socket.io, so
+#     the UI's live updates work
+#   - restart policies: on a fresh install the controller and the adapter race
+#     to create the same NATS key-value store and the loser exits; upstream
+#     does not restart it
+#
+# Relative paths below resolve against Oktopus's compose directory (the first
+# compose file's), so files from this repository are referenced absolutely.
+
+services:
+  msg_broker:
+    image: nats:2.15.0
+    container_name: oktopus-nats
+    restart: unless-stopped
+    ports: !reset []
+
+  controller:
+    image: oktopusp/controller:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-controller
+    restart: unless-stopped
+    ports: !reset []
+
+  mongo_usp:
+    image: mongo:7.0
+    container_name: oktopus-mongo
+    restart: unless-stopped
+    ports: !reset []
+
+  mqtt:
+    image: oktopusp/mqtt:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-mqtt
+    restart: unless-stopped
+    ports: !reset []
+    networks:
+      vdev-lab:
+        aliases: [controller-broker]
+
+  mqtt-adapter:
+    image: oktopusp/mqtt-adapter:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-mqtt-adapter
+    restart: unless-stopped
+
+  adapter:
+    image: oktopusp/adapter:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-adapter
+    restart: unless-stopped
+
+  socketio:
+    image: oktopusp/socketio:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-socketio
+    restart: unless-stopped
+    ports: !reset []
+
+  frontend:
+    image: oktopusp/frontend:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-frontend
+    restart: unless-stopped
+    ports: !reset []
+
+  file-server:
+    image: oktopusp/file-server:${OKTOPUS_TAG:?}
+    platform: linux/amd64
+    container_name: oktopus-file-server
+    restart: unless-stopped
+    ports: !reset []
+
+  nginx:
+    image: nginx:1.27
+    container_name: oktopus-nginx
+    restart: unless-stopped
+    ports: !override
+      - "${VDEV_OKTOPUS_PORT:-8090}:80"
+    volumes: !override
+      - ${VDEV_LAB_DIR:?}/oktopus/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+networks:
+  vdev-lab:
+    external: true

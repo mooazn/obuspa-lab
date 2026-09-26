@@ -12,6 +12,12 @@
 # the endpoint ID is stable across container recreation.
 Device.LocalAgent.EndpointID "os::vdev-001"
 
+# What the device says it is. obuspa otherwise reports its compile-time
+# placeholders ("Manufacturer", "USP Agent"), which is what controllers list.
+Device.DeviceInfo.Manufacturer "obuspa-lab"
+Device.DeviceInfo.ModelName "Virtual Gateway"
+Device.DeviceInfo.ProductClass "VirtualGateway"
+
 # --- MQTT client ------------------------------------------------------------
 Device.MQTT.Client.1.Alias "cpe-1"
 Device.MQTT.Client.1.Enable true
@@ -54,7 +60,8 @@ Device.LocalAgent.Controller.1.MTP.1.MQTT.Topic "/usp/controller"
 # The web UI's Browse view talks to the agent as this controller, so that the
 # agent can tell it apart from the test suite's (Controller.1): what the lab
 # creates is owned by Controller.2. agent/entrypoint.sh also adds these lines
-# to a database that predates them, so no factory reset is needed.
+# to a database that predates them, as it does for DeviceInfo above, so no
+# factory reset is needed.
 Device.LocalAgent.Controller.2.Alias "lab"
 Device.LocalAgent.Controller.2.Enable true
 Device.LocalAgent.Controller.2.EndpointID "self::vdev-lab"

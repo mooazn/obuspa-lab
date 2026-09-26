@@ -65,20 +65,30 @@ if [ -f "$RUN_DIR/factory-reset" ]; then
     rm -f "$RUN_DIR/factory-reset"
 fi
 
-# A database created before the lab controller existed lacks Controller.2, and
-# obuspa ignores endpoints it has no Controller row for. Add the rows from the
-# factory file, written directly to the database before obuspa opens it.
-# A fresh database gets them from the factory file in the usual way.
+# Factory values the lab added after databases already existed. obuspa reads
+# the factory file only when it creates a database, so an older database would
+# never see them - and without Controller.2, obuspa ignores the lab controller
+# as an unknown endpoint. Missing values are written straight into the
+# database before obuspa opens it; values already present are left alone.
+db_has() {
+    "$INTERNAL_BIN" -f "$DB" -c dbget "$1" 2>/dev/null | grep -q "^$1 => "
+}
+db_fill() {         # adds the factory lines under prefix $1 that the database lacks
+    while read -r path value; do
+        case "$path" in "$1"*) ;; *) continue ;; esac
+        db_has "$path" && continue
+        value="${value#\"}"; value="${value%\"}"
+        "$INTERNAL_BIN" -f "$DB" -c dbset "$path" "$value" >/dev/null 2>&1 \
+            || log "could not set $path in the agent database"
+    done < "$RESET_FILE"
+}
 if [ -f "$DB" ]; then
+    db_fill Device.DeviceInfo.
     LAB_ID="$("$INTERNAL_BIN" -f "$DB" -c dbget Device.LocalAgent.Controller.2.EndpointID 2>/dev/null \
         | sed -n 's/^Device.LocalAgent.Controller.2.EndpointID => //p')"
     if [ -z "$LAB_ID" ]; then
         log "adding the lab controller (Controller.2) to the existing agent database"
-        grep '^Device\.LocalAgent\.Controller\.2\.' "$RESET_FILE" | while read -r path value; do
-            value="${value#\"}"; value="${value%\"}"
-            "$INTERNAL_BIN" -f "$DB" -c dbset "$path" "$value" >/dev/null 2>&1 \
-                || log "could not set $path in the agent database"
-        done
+        db_fill Device.LocalAgent.Controller.2.
     elif [ "$LAB_ID" != "self::vdev-lab" ]; then
         log "Controller.2 is $LAB_ID, not the lab controller - the web UI's Browse view will get no answers"
     fi

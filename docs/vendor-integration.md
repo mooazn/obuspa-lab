@@ -50,7 +50,7 @@ The directory's name becomes the plug-in's name. Plug-ins are compiled inside
 the platform's build container, **against the obuspa tree the card will
 boot** — the built-in one, or the one you flashed with `SRC`/`REF`. That is
 deliberate: obuspa's vendor API moves between releases, and this catches it
-before it reaches a device (see §6, logging).
+before it reaches a device (see §7, logging).
 
 ### As a whole tree
 
@@ -315,7 +315,73 @@ threshold as if it came from a board's EEPROM.
 
 ---
 
-## 6. Things that bite
+## 6. Bringing your own controller
+
+The lab's own controllers are test tools. To see your work through a real
+controller - the one your operator runs, or an open source one - plug it
+into the agent as another controller. The lab stays controller-agnostic:
+nothing in it knows which controller is attached.
+
+**Oktopus, ready made.** [Oktopus](https://github.com/OktopUSP/oktopus) is
+an open source USP controller and device management platform.
+
+```
+make oktopus         # fetch the pinned release, start it, plug it into the agent
+                     # UI: http://127.0.0.1:8090 - create an admin account on first visit
+make oktopus-down    # unplug it and stop it (its data is kept in .oktopus/)
+```
+
+The device appears in Oktopus's inventory as `os::vdev-001`, and everything
+Oktopus does - Get, Set, Add, Delete, Operate, reboots - reaches the
+simulated hardware through the agent, exactly as the lab's own requests do.
+
+**How a controller is attached.** A controller reached over its own MQTT
+connection needs three rows in the agent: a `Device.MQTT.Client` (the
+connection to its broker), a `Device.LocalAgent.MTP` (the agent listening on
+it) and a `Device.LocalAgent.Controller`. The device creates them from a
+small definition, `controllers/oktopus.json` being the example:
+
+```
+POST   /api/controllers {name, endpointId, broker: {address, port},
+                         controllerTopic, agentTopic?, role?}
+GET    /api/controllers
+DELETE /api/controllers/<name>
+```
+
+Every row carries the name as its `Alias`. Plugging in again replaces the
+rows, and the agent makes a fresh connection. To take a controller offline
+without removing it, set `Device.MQTT.Client.[Alias=="<name>"].Enable` to
+`false` in the Browse view.
+
+**The second WAN route.** The agent reaches another controller's broker
+through the device's WAN port, like its own: `mosquitto:1884` leads to
+whatever is attached to the `vdev-lab` network as `controller-broker` (Oktopus's
+broker is). WAN faults cut both routes and latency applies to both, so a
+`wan_down` takes the device offline in the other controller too. To use your
+own controller, attach its broker to `vdev-lab` with that alias and write a
+definition for it; a broker reachable some other way needs only the right
+`broker` address in the definition, but then bypasses the WAN faults.
+
+**Things to know.**
+- The rows live in the agent's database: they survive reboots and are
+  removed by a factory reset - including the one the test suite performs.
+  Plug in again afterwards (`make oktopus`).
+- Oktopus lists a device when its broker sees the agent subscribe, and does
+  not ask again. `make oktopus` waits for Oktopus to be ready before
+  plugging in; if Oktopus ever shows the device offline while the lab says
+  it is connected, plugging in again makes a fresh connection.
+- A controller that tracks devices by endpoint ID sees one device per
+  agent. Two connections from the agent to the same broker confuse it: when
+  either closes, the device is marked offline.
+- Oktopus's images are amd64 only; on Apple Silicon they run emulated.
+- `tests/test_07_oktopus.py` checks the device is listed, that Oktopus reads
+  and writes the hardware, and that WAN faults reach it. It runs only with
+  Oktopus up and an account given in `VDEV_OKTOPUS_EMAIL` and
+  `VDEV_OKTOPUS_PASSWORD`.
+
+---
+
+## 7. Things that bite
 
 **Logging.** Use `USP_LOG_Printf(kLogLevel_Info, kLogType_Debug, fmt, …)`.
 The convenience macros `USP_LOG_Error/Warning/Info` are **not stable across
@@ -371,7 +437,7 @@ change to its factory configuration.
 
 ---
 
-## 7. Worked examples
+## 8. Worked examples
 
 `examples/disk-monitor/` — a vendor object with a live getter, a persisted
 controller-writable threshold, a background thread doing `statvfs()`, a

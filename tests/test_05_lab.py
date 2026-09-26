@@ -307,6 +307,14 @@ def _lab(device_url, op, body):
     return requests.post(f"{device_url}/api/usp/{op}", json=body, timeout=20)
 
 
+def test_device_identifies_as_the_lab_device(controller):
+    """Controllers list the device by these, not by obuspa's placeholders."""
+    values = controller.get("Device.DeviceInfo.", max_depth=1)
+    assert values["Device.DeviceInfo.Manufacturer"] == "obuspa-lab"
+    assert values["Device.DeviceInfo.ModelName"] == "Virtual Gateway"
+    assert values["Device.DeviceInfo.ProductClass"] == "VirtualGateway"
+
+
 def test_lab_controller_is_provisioned(controller):
     assert controller.get_one(LAB + "EndpointID") == "self::vdev-lab"
     assert controller.get_one(LAB + "Enable") == "true"
@@ -394,3 +402,78 @@ def test_lab_controller_is_restored_into_an_existing_database(controller, device
     assert controller.get_one(LAB + "EndpointID") == "self::vdev-lab"
     assert any("adding the lab controller" in line["text"] for line in console(since=since))
     assert _lab(device_url, "get", {"path": "Device.LocalAgent.EndpointID"}).status_code == 200
+
+
+# ----------------------------------------------------------------------
+# Other controllers, plugged in at runtime (make oktopus uses this)
+# ----------------------------------------------------------------------
+
+# Points at a port nothing listens on: the rows are what is under test, and a
+# real broker - say Oktopus on the 1884 route - must not see a second
+# connection from this agent (it tracks devices by endpoint ID, and this
+# one's disconnect would mark the device offline there).
+PLUG = {
+    "name": "test-ctl",
+    "endpointId": "self::test-plugged",
+    "broker": {"address": "mosquitto", "port": 1885},
+    "controllerTopic": "/usp/test-plugged",
+}
+
+
+def _aliases(controller, table):
+    """Instance paths ("Device.MQTT.Client.3.") in a table carrying the test alias."""
+    return sorted(path[: -len("Alias")] for path, alias in controller.get(table + "*.Alias").items()
+                  if alias == PLUG["name"])
+
+
+@pytest.fixture
+def plugged(device_url):
+    yield lambda body=PLUG: requests.post(f"{device_url}/api/controllers", json=body, timeout=30)
+    requests.delete(f"{device_url}/api/controllers/{PLUG['name']}", timeout=30)
+
+
+def test_wan_has_a_route_for_other_controllers(wan_state):
+    routes = {r["listen"]: r["upstream"] for r in wan_state()["routes"]}
+    assert routes["0.0.0.0:1883"] == "broker:1883"
+    assert routes["0.0.0.0:1884"] == "controller-broker:1883"
+
+
+def test_plugging_a_controller_creates_its_rows(controller, device_url, plugged):
+    response = plugged()
+    assert response.status_code == 200, response.text
+    entry = response.json()["controller"]
+    assert entry["name"] == "test-ctl" and entry["endpointId"] == "self::test-plugged"
+    assert entry["broker"] == "mosquitto:1885" and entry["enabled"] is True
+
+    client = entry["client"]
+    ctrl = entry["controller"]
+    assert controller.get_one(ctrl + ".EndpointID") == "self::test-plugged"
+    assert controller.get_one(ctrl + ".MTP.1.MQTT.Reference") == client
+    assert controller.get_one(ctrl + ".MTP.1.MQTT.Topic") == "/usp/test-plugged"
+    mtp = _aliases(controller, "Device.LocalAgent.MTP.")
+    assert len(mtp) == 1 and controller.get_one(mtp[0] + "MQTT.Reference") == client
+
+    listed = requests.get(f"{device_url}/api/controllers", timeout=10).json()["controllers"]
+    assert [c["name"] for c in listed if c["name"] == "test-ctl"] == ["test-ctl"]
+
+
+def test_plugging_again_replaces_rather_than_duplicates(controller, plugged):
+    assert plugged().status_code == 200
+    assert plugged().status_code == 200
+    for table in ("Device.MQTT.Client.", "Device.LocalAgent.MTP.", "Device.LocalAgent.Controller."):
+        assert len(_aliases(controller, table)) == 1, table
+
+
+def test_unplugging_removes_every_row(controller, device_url, plugged):
+    assert plugged().status_code == 200
+    assert requests.delete(f"{device_url}/api/controllers/test-ctl", timeout=30).status_code == 200
+    for table in ("Device.MQTT.Client.", "Device.LocalAgent.MTP.", "Device.LocalAgent.Controller."):
+        assert _aliases(controller, table) == [], table
+    assert requests.delete(f"{device_url}/api/controllers/test-ctl", timeout=30).status_code == 404
+
+
+def test_controller_definitions_are_validated(plugged):
+    for bad in ({**PLUG, "name": "Bad Name"}, {**PLUG, "name": "lab"},
+                {**PLUG, "endpointId": ""}, {**PLUG, "broker": {"address": "x"}},
+                {**PLUG, "controllerTopic": None}, "not-an-object"):
+        assert plugged(bad).status_code in (400, 422), bad

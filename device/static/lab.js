@@ -129,7 +129,11 @@ async function post(url, body, method = "POST") {
   return res.json();
 }
 
+// Offsets come from a clock snapped to whole seconds, so a one-day jump reads
+// as 86399.x s; round to the minute rather than truncate
 function fmtDuration(seconds) {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  seconds = Math.round(seconds / 60) * 60;
   const d = Math.floor(seconds / 86400), h = Math.floor(seconds % 86400 / 3600), m = Math.floor(seconds % 3600 / 60);
   const parts = [];
   if (d) parts.push(`${d}d`);

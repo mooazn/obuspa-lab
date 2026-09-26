@@ -15,16 +15,16 @@ not need a board, a card reader, or a power strip.
                            │ Unix socket
                     device container ("hardware")   ◀── 3D device, data model, HAL
                            │ WAN relay
-                    broker ◀──▶ USP controller (yours, or the pytest one)
+                    broker ◀──▶ USP controllers (the pytest one, the lab's own, yours, Oktopus)
 ```
 
 **What you get**
 
 - **A real agent.** obuspa, pinned to a release, talking protobuf USP records
   over MQTT to a real broker. Nothing about the protocol is mocked.
-- **A device with behaviour.** 79 TR-181 entries across 10 objects — WiFi
-  radios, SSIDs, access points and their clients, Hosts, IP, Ethernet,
-  Cellular with a removable SIM. Disabling a radio takes its SSIDs down and
+- **A device with behaviour.** 79 TR-181 parameters across 12 objects — WiFi
+  radios, SSIDs, access points and their clients, Hosts, IP, Ethernet, a
+  firewall, Cellular with a removable SIM. Disabling a radio takes its SSIDs down and
   drops its clients; the other radio carries on. Sync and async commands.
 - **A device you can handle.** A 3D gateway with LEDs that follow state, a
   reset button (press: reboot; hold: factory reset), a SIM slot, and an SD
@@ -49,6 +49,10 @@ not need a board, a card reader, or a power strip.
 - **Ways to observe it.** A serial console, a decoded USP timeline, a
   browser for the agent's data model as a controller sees it, and a Python
   USP controller you can write tests against.
+- **A real controller, if you want one.** `make oktopus` runs
+  [Oktopus](https://github.com/OktopUSP/oktopus), an open source USP
+  controller, next to the lab and plugs it into the agent; any other
+  controller attaches the same way.
 
 **Two scenarios it exists for**, each a worked example with tests.
 `examples/disk-monitor/`: a vendor thread does `statvfs()` on `/data`; the
@@ -57,6 +61,29 @@ disk still full and it alarms again. `examples/parental-controls/`: a
 controller adds a vendor rule naming a client; the vendor's thread writes a
 firewall rule; the device takes the client offline; the rule survives a
 reboot and blocks the client when it reassociates.
+
+## A look around
+
+**USP › Browse** — the agent's data model as a controller sees it, including
+everything obuspa serves itself. Here, the three controllers the agent knows:
+the test suite, the lab, and Oktopus.
+
+![The Browse view listing the agent's three controllers](docs/images/usp-browse.png)
+
+**USP › Timeline** — every record between the agent and its controllers,
+decoded; click one for the full message.
+
+![The USP timeline with a decoded Set request](docs/images/usp-timeline.png)
+
+**Faults & clock** — a 150 ms WAN latency fault applied, and the clock a day
+ahead for the device and the firmware alike.
+
+![The Faults and clock tab with a latency fault and a clock jump](docs/images/faults-clock.png)
+
+**Oktopus** — the lab device in a real controller's inventory, after
+`make oktopus`.
+
+![Oktopus listing the lab device as online](docs/images/oktopus.png)
 
 ## Quick start
 
@@ -212,9 +239,11 @@ agent/        obuspa + plug-in image, the bootloader-like entrypoint, the
 sdcard/       the SD card: `make flash` writes obuspa + plug-in + manifest here
 plugin/       the C shim: grouped vendor hooks -> Unix socket JSON
 device/       the virtual device: model, state, faults, WAN relay, web UI, 3D scene
-examples/     disk-monitor: a worked vendor plug-in
+examples/     disk-monitor, parental-controls: worked vendor plug-ins
 docs/         vendor-integration.md — the contract for bringing your own code
 controller/   USP controller and the BBF protobuf schemas
+controllers/  definitions of other controllers the agent can be plugged into
+oktopus/      how `make oktopus` runs Oktopus: compose override, nginx config
 tests/        the suite, run from the host against the stack
 mosquitto/    broker config
 ```
