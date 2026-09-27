@@ -28,7 +28,8 @@ not need a board, a card reader, or a power strip.
   drops its clients; the other radio carries on. Sync and async commands.
 - **A device you can handle.** A 3D gateway with LEDs that follow state, a
   reset button (press: reboot; hold: factory reset), a SIM slot, and an SD
-  card slot. Reboots are real: the agent process exits and restarts, and a
+  card slot. The Device tab lays the box out as on a bench: power, ports,
+  radios, clients, SIM and card, each beside the controls that change it. Reboots are real: the agent process exits and restarts, and a
   subscribed controller gets `Boot!`.
 - **An SD card.** `make flash SRC=~/obuspa` compiles *your* obuspa tree onto
   it; seat it, press reset, and the device boots your binary. Booting upstream
@@ -63,6 +64,12 @@ firewall rule; the device takes the client offline; the rule survives a
 reboot and blocks the client when it reassociates.
 
 ## A look around
+
+**Device** — the board on the bench: every part's state beside the switch,
+field or button that changes it, set as the hardware would. All the raw
+values are one click below.
+
+![The Device tab: power, WAN, LAN, Wi-Fi, cellular, SD card and firewall cards](docs/images/device.png)
 
 **USP › Browse** — the agent's data model as a controller sees it, including
 everything obuspa serves itself. Here, the three controllers the agent knows:

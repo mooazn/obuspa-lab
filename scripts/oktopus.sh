@@ -3,7 +3,8 @@
 # next to the lab and plugs it into the agent as another controller.
 #
 #   scripts/oktopus.sh up     fetch the pinned release, start it, plug it in
-#   scripts/oktopus.sh down   unplug it and stop it (its data is kept)
+#   scripts/oktopus.sh down   unplug it and stop it (its data is kept in Docker
+#                             volumes; docker compose -p oktopus down -v drops it)
 #
 # Oktopus runs as its own compose project from a checkout in .oktopus/, with
 # oktopus/compose.override.yml applied. The lab must already be running: the

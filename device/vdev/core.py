@@ -248,7 +248,10 @@ class VirtualDevice:
 
         for schema_path, rows in saved.get("objects", {}).items():
             obj = self._object_by_schema(schema_path)
-            if obj is None:
+            # Rows made only of runtime state (associated clients, the hosts
+            # seen through them) are not restored, as on a reboot: they would
+            # come back as empty shells of defaults. The factory's stay.
+            if obj is None or _runtime_only(obj):
                 continue
             restored: dict[tuple[int, ...], dict[str, Any]] = {}
             for key, values in rows.items():
@@ -290,6 +293,7 @@ class VirtualDevice:
                         for instances, values in self._state[obj.path].items()
                     }
                     for obj in self._model
+                    if not _runtime_only(obj)
                 },
                 "boot_count": self.boot_count,
                 "reboot_cause": self.reboot_cause,
@@ -996,10 +1000,7 @@ class VirtualDevice:
             # entirely of volatile state (associated clients) do not come back
             # at all - nothing reassociates until it decides to.
             for obj in self._model:
-                volatile_row = all(
-                    not p.persistent for p in obj.params if p.derived is None
-                )
-                if volatile_row:
+                if _runtime_only(obj):
                     # Rows made entirely of runtime state do not survive: WiFi
                     # clients have to reassociate. Anything the factory defines
                     # is rediscovered though, the way a gateway repopulates its
@@ -1019,3 +1020,13 @@ class VirtualDevice:
 
         log.info("device booted (boot count %d, cause %s)",
                  self.boot_count, self.reboot_cause)
+
+
+def _runtime_only(obj: ObjectDef) -> bool:
+    """Whether an object's rows hold nothing but runtime state.
+
+    Such rows (Wi-Fi clients, hosts) are not configuration: they do not
+    survive a reboot or a restart of the device, except those the factory
+    defines, which are rediscovered.
+    """
+    return all(not p.persistent for p in obj.params if p.derived is None)

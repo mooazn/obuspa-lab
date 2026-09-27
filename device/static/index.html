@@ -155,6 +155,37 @@
     box-shadow: 0 6px 20px rgba(0,0,0,0.2); opacity: 0; transition: opacity 0.2s;
   }
   .notice.show { opacity: 1; }
+  /* --- bench view (Device tab) --- */
+  .bench { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 12px; align-items: start; }
+  .bench .card { margin-bottom: 0; }
+  .bench-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .bench-title { font-weight: 600; font-size: 14px; }
+  .bench-body { display: flex; flex-direction: column; gap: 7px; }
+  .bench-line { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; font-size: 13px; min-height: 26px; }
+  .bench-kv { display: inline-flex; align-items: baseline; gap: 6px; }
+  .bench-kv .k { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .bench-kv .v:empty { display: none; }
+  .bench-strong { font-weight: 600; }
+  .bench-sub { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+  .bench-block { display: flex; flex-direction: column; gap: 7px; }
+  .bench-block + .bench-block { border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px; }
+  .bench-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); }
+  .bench .ro { font-size: 13px; }
+  input.bench-input { width: auto; padding: 3px 7px; font-size: 13px; }
+  input.bench-input.w-s { width: 5em; }
+  input.bench-input.w-l { flex: 1 1 10em; min-width: 8em; }
+  .bench-note { font-size: 12px; color: #b45309; }
+  .bench button { padding: 4px 10px; }
+  .all-values { margin-top: 18px; }
+  .all-values > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .all-values > summary .count { font-size: 11px; font-weight: 400; padding: 1px 7px; border-radius: 999px;
+    background: var(--bg); border: 1px solid var(--border); }
+  .all-values .all-hint { font-weight: 400; }
+  .all-values a { color: var(--accent); }
   /* --- lab tabs --- */
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
   .tab {
@@ -259,8 +290,13 @@
   <nav class="tabs" id="tabs"></nav>
 
   <section data-tab="model">
-    <div id="system"></div>
-    <div id="content"></div>
+    <div id="bench"></div>
+    <details class="all-values" id="all-values">
+      <summary>All device values <span class="count" id="all-count"></span>
+        <span class="all-hint">set here as the hardware ·
+          <a href="#" id="to-browse">see them as a controller does</a></span></summary>
+      <div id="content"></div>
+    </details>
   </section>
   <section data-tab="console" hidden></section>
   <section data-tab="usp" hidden></section>
@@ -269,7 +305,7 @@
   <section data-tab="hal" hidden></section>
 
   <p class="hint">
-    The whole tree below is served to obuspa over the data-model proxy socket.
+    Every device value is served to obuspa over the data-model proxy socket.
     Derived values (<code>Status</code>, <code>AssociatedDeviceNumberOfEntries</code>)
     are computed, not stored — disabling a radio takes its SSIDs down and drops
     every client associated through it.
@@ -281,6 +317,7 @@
 </script>
 <script type="module">
 import { mountScene } from "/static/scene.js";
+import { renderBench } from "/static/bench.js";
 
 const noticeEl = document.getElementById("notice");
 let noticeTimer = null;
@@ -309,13 +346,17 @@ window.scene3d = mountScene(document.getElementById("viewport"), {
                                 : "Card ejected — press reset to boot the built-in image")),
   notice,
 });
+window.notice = notice;
+window.renderBench = renderBench;
 // The page may have rendered before the module loaded
-if (window.state) window.scene3d.applyState(window.state);
+if (window.state) window.render(window.state);
 </script>
 
 <script>
 const content = document.getElementById("content");
-const system = document.getElementById("system");
+const bench = document.getElementById("bench");
+const allValues = document.getElementById("all-values");
+const allCount = document.getElementById("all-count");
 const conn = document.getElementById("conn");
 let state = null;
 window.post = post;
@@ -339,6 +380,29 @@ async function post(url, body) {
   return res.json();
 }
 
+// What the bench view needs: requests that render the state they return,
+// and report failures without a modal
+const report = (message) => (window.notice || alert)(message);
+const benchApi = {
+  post: (url, body) => post(url, body)
+    .then(b => { if (b && b.state) render(b.state); })
+    .catch(e => report(e.message)),
+  setParam: async (path, value) => {
+    try { render((await post("/api/set", {path, value})).state); }
+    catch (e) { report(e.message); render(state); }
+  },
+};
+
+// The full tree stays one click away, open or closed as last left
+try { allValues.open = localStorage.getItem("vdev.allValues") === "open"; } catch (e) {}
+allValues.addEventListener("toggle", () => {
+  try { localStorage.setItem("vdev.allValues", allValues.open ? "open" : "closed"); } catch (e) {}
+});
+document.getElementById("to-browse").addEventListener("click", (e) => {
+  e.preventDefault(); e.stopPropagation();
+  if (window.lab && window.lab.openBrowse) window.lab.openBrowse("Device.");
+});
+
 async function setParam(path, value, errHolder) {
   try {
     const body = await post("/api/set", {path, value});
@@ -352,75 +416,6 @@ async function setParam(path, value, errHolder) {
 }
 
 // ---------------------------------------------------------------- system
-
-function formatUptime(s) {
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-function renderSystem(sys) {
-  system.innerHTML = "";
-  const card = el("div", "card");
-
-  if (sys.rebooting) {
-    card.appendChild(el("div", "rebooting",
-      "Rebooting — the data model proxy socket is down, so the agent has lost the device."));
-  }
-
-  const row = el("div", "sys");
-  for (const [k, v] of [
-    ["uptime", sys.rebooting ? "—" : formatUptime(sys.upTime || 0)],
-    ["boots", String(sys.bootCount ?? 0)],
-    ["last cause", sys.rebootCause || "—"],
-  ]) {
-    const stat = el("div", "stat");
-    stat.append(el("span", "k", k), el("span", "v", v));
-    row.appendChild(stat);
-  }
-
-  const spacer = el("div", "spacer");
-  row.appendChild(spacer);
-
-  const simBtn = el("button", "ghost", (sys.sim && sys.sim.inserted) ? "Eject SIM" : "Insert SIM");
-  simBtn.onclick = () => post("/api/sim", {action: (sys.sim && sys.sim.inserted) ? "eject" : "insert"})
-    .then(b => render(b.state)).catch(e => alert(e.message));
-  row.appendChild(simBtn);
-
-  const sdc = sys.sdcard || {};
-  const sdBtn = el("button", "ghost", sdc.inserted ? "Eject SD card" : "Seat SD card");
-  sdBtn.disabled = !sdc.present && !sdc.inserted;
-  sdBtn.title = sdc.present ? `${sdc.manifest.label} (${sdc.manifest.commit})` : "run `make flash` first";
-  sdBtn.onclick = () => post("/api/sdcard", {action: sdc.inserted ? "eject" : "insert"})
-    .then(b => render(b.state)).catch(e => alert(e.message));
-  row.appendChild(sdBtn);
-
-  const add = el("button", "ghost", "Add WiFi client");
-  add.onclick = () => post("/api/clients/attach", {accessPoint: 1})
-    .then(b => render(b.state)).catch(e => alert(e.message));
-  row.appendChild(add);
-
-  const btn = el("button", "danger", sys.rebooting ? "Rebooting…" : "Reboot");
-  btn.disabled = !!sys.rebooting;
-  btn.onclick = () => post("/api/reboot", {cause: "LocalReboot"}).catch(e => alert(e.message));
-  row.appendChild(btn);
-
-  card.appendChild(row);
-
-  const jobs = sys.runningJobs || [];
-  if (jobs.length) {
-    const holder = el("div", "jobs");
-    for (const job of jobs) {
-      const line = el("div", "job");
-      line.append(el("span", "spin"), el("span", "", `${job.path}  request ${job.requestId}`));
-      holder.appendChild(line);
-    }
-    card.appendChild(holder);
-  }
-
-  system.appendChild(card);
-}
 
 function renderBootTag(sys) {
   const tag = document.getElementById("boot-tag");
@@ -488,8 +483,9 @@ function render(next) {
   const focusedPath = active && active.dataset ? active.dataset.field : null;
   const caret = active && active.selectionStart;
 
-  renderSystem(state.system || {});
+  if (window.renderBench) window.renderBench(bench, state, benchApi);
   content.innerHTML = "";
+  allCount.textContent = String(state.objects.reduce((n, o) => n + o.rows.length * o.params.length, 0));
 
   for (const object of state.objects) {
     const head = el("div", "schema");
