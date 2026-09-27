@@ -328,7 +328,7 @@ an open source USP controller and device management platform.
 ```
 make oktopus         # fetch the pinned release, start it, plug it into the agent
                      # UI: http://127.0.0.1:8090 - create an admin account on first visit
-make oktopus-down    # unplug it and stop it (its data is kept in .oktopus/)
+make oktopus-down    # unplug it and stop it (its data is kept in Docker volumes)
 ```
 
 The device appears in Oktopus's inventory as `os::vdev-001`, and everything

@@ -652,7 +652,7 @@ const controllersPanel = {
 // ---------------------------------------------------------------- boot
 
 export function initLab() {
-  registerPanel("model",   "Data model", {});
+  registerPanel("model",   "Device",     {});
   registerPanel("console", "Console",    consolePanel);
   registerPanel("usp",     "USP",        uspPanel);
   registerPanel("controllers", "Controllers", controllersPanel);
@@ -664,6 +664,13 @@ export function initLab() {
   activate(panels[initial] ? initial : "model");
 
   return {
+    // Opens USP > Browse on a path and runs the Get
+    openBrowse(path) {
+      activate("usp");
+      uspPanel.show("browse");
+      browseView.path.value = path;
+      browseView.get();
+    },
     onState(state) {
       // One panel failing must not take the data model tree down with it
       for (const [name, panel] of Object.entries(panels)) {

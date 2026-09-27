@@ -17,6 +17,9 @@
 #   - restart policies: on a fresh install the controller and the adapter race
 #     to create the same NATS key-value store and the loser exits; upstream
 #     does not restart it
+#   - MongoDB's and NATS's data in Docker volumes rather than folders in the
+#     checkout: on a macOS bind mount MongoDB can lose permission to open its
+#     own files after Docker Desktop restarts ("Operation not permitted")
 #
 # Relative paths below resolve against Oktopus's compose directory (the first
 # compose file's), so files from this repository are referenced absolutely.
@@ -27,6 +30,9 @@ services:
     container_name: oktopus-nats
     restart: unless-stopped
     ports: !reset []
+    volumes: !override
+      - oktopus-nats:/tmp/nats/jetstream
+      - ./nats_config:/tmp/nats/config
 
   controller:
     image: oktopusp/controller:${OKTOPUS_TAG:?}
@@ -40,6 +46,8 @@ services:
     container_name: oktopus-mongo
     restart: unless-stopped
     ports: !reset []
+    volumes: !override
+      - oktopus-mongo:/data/db
 
   mqtt:
     image: oktopusp/mqtt:${OKTOPUS_TAG:?}
@@ -92,6 +100,10 @@ services:
       - "${VDEV_OKTOPUS_PORT:-8090}:80"
     volumes: !override
       - ${VDEV_LAB_DIR:?}/oktopus/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  oktopus-mongo:
+  oktopus-nats:
 
 networks:
   vdev-lab:
