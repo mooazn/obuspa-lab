@@ -1,0 +1,11 @@
+# Line endings stay LF in every checkout, including on Windows, where Git
+# converts text to CRLF by default. Nearly everything here runs in a Linux
+# container or under a POSIX shell: a CRLF entrypoint.sh fails in the image
+# ("#!/bin/sh\r"), and CRLF breaks shell scripts, Makefiles and the agent's
+# factory file. Checked by .github/workflows/windows.yml.
+* text=auto eol=lf
+
+# Binary: never converted
+*.png binary
+*.jpg binary
+*.so binary

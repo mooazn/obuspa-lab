@@ -1,0 +1,68 @@
+# Windows checkout of the repository
+
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checkout:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Git's line-ending setting on this runner
+        run: git config --show-origin --get-all core.autocrlf; exit 0
+
+      - uses: actions/checkout@v5
+
+      - name: Every text file is checked out with LF endings
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $crlf = git ls-files --eol | Where-Object { $_ -match 'w/crlf' }
+          if ($crlf) {
+            Write-Output "Checked out with CRLF (they break in Linux containers and POSIX shells):"
+            $crlf | ForEach-Object { Write-Output "  $_" }
+            exit 1
+          }
+          Write-Output "no CRLF in the working tree"
+
+      # PowerShell does not stop on a failing native command unless told to
+      - name: The compose files parse
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          docker compose version
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+          $env:VDEV_HTTP_HOST_PORT = "8081"
+          if (-not (docker compose -f docker-compose.yml config | Select-String 'published: "8081"')) {
+            throw "VDEV_HTTP_HOST_PORT did not reach the published port"
+          }
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: A Windows virtualenv takes the controller's requirements
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m venv .venv
+          .venv\Scripts\python -m pip install --quiet -r controller/requirements.txt
+
+      # Git Bash, which is what the scripts need on Windows; the venv keeps
+      # its interpreter in Scripts\ rather than bin/
+      - name: The protobuf bindings generate
+        shell: bash
+        run: PYTHON="$PWD/.venv/Scripts/python.exe" bash scripts/gen_proto.sh
+
+      - name: The controller and the test suite import on Windows
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          .venv\Scripts\python -c "import sys; sys.path.insert(0, 'controller'); import uspctl; print('uspctl', uspctl.UspController.__name__)"
+          .venv\Scripts\python -m pytest --collect-only -q tests
