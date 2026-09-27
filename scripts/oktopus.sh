@@ -74,13 +74,15 @@ up() {
     # Plugging in replaces any earlier rows, so the agent always makes a fresh
     # connection that Oktopus sees
     echo "oktopus: plugging it into the agent"
-    if ! curl -sf -X POST "$LAB/api/controllers" -H 'Content-Type: application/json' \
-            --data @"$ROOT/controllers/oktopus.json" >/dev/null; then
+    # The definition names the default UI address; follow VDEV_OKTOPUS_PORT
+    if ! sed "s#http://127.0.0.1:8090#$UI#" "$ROOT/controllers/oktopus.json" \
+            | curl -sf -X POST "$LAB/api/controllers" -H 'Content-Type: application/json' \
+                --data @- >/dev/null; then
         echo "oktopus: the lab at $LAB did not accept the controller - is the agent up?" >&2
         exit 1
     fi
     echo
-    echo "Oktopus UI:  $UI   (first visit: create an admin account)"
+    echo "Oktopus UI:  $UI   (first visit: create an admin account; also linked from the lab's Controllers tab)"
     echo 'unplug:      make oktopus-down, or set Device.MQTT.Client.[Alias=="oktopus"].Enable to false in Browse'
 }
 

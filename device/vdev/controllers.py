@@ -17,13 +17,18 @@ A definition:
      "broker": {"address": "mosquitto", "port": 1884},
      "controllerTopic": "oktopus/usp/v1/controller",
      "agentTopic": "",                     # optional; "" = assigned by the broker
-     "role": "Device.LocalAgent.ControllerTrust.Role.1"}   # optional
+     "role": "Device.LocalAgent.ControllerTrust.Role.1",   # optional
+     "ui": "http://127.0.0.1:8090",        # optional; the lab UI links to it
+     "description": "..."}                 # optional
+
+The last two are the lab's, not the agent's: the device keeps them with its
+other lab state.
 """
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from .labctl import LabController, LabControllerError
 
@@ -63,14 +68,39 @@ def validate(definition: Any) -> dict:
     role = definition.get("role", FULL_ACCESS)
     if not isinstance(agent_topic, str) or not isinstance(role, str):
         raise ValueError("agentTopic and role must be strings")
+    ui = definition.get("ui", "")
+    if not isinstance(ui, str) or (ui and not ui.startswith(("http://", "https://"))):
+        raise ValueError("ui must be an http(s) URL")
+    description = definition.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError("description must be a string")
     return {"name": name, "endpointId": endpoint,
             "broker": {"address": broker["address"], "port": broker["port"]},
-            "controllerTopic": topic, "agentTopic": agent_topic, "role": role}
+            "controllerTopic": topic, "agentTopic": agent_topic, "role": role,
+            "ui": ui, "description": description}
+
+
+# The controllers the lab itself provisions, by endpoint
+KINDS = {"self::usp-controller": "tests", "self::vdev-lab": "lab"}
 
 
 class ControllerPlugs:
-    def __init__(self, lab: LabController):
+    def __init__(self, lab: LabController, device=None):
         self.lab = lab
+        self.device = device
+
+    def _meta(self) -> dict:
+        return self.device.controller_meta if self.device is not None else {}
+
+    def _remember(self, name: str, meta: Optional[dict]) -> None:
+        if self.device is None:
+            return
+        with self.device._lock:
+            if meta:
+                self.device.controller_meta[name] = meta
+            else:
+                self.device.controller_meta.pop(name, None)
+            self.device.persist()
 
     def _with_alias(self, table: str, name: str) -> list[str]:
         """Instance paths ("Device.MQTT.Client.3.") in a table whose Alias is name."""
@@ -78,27 +108,49 @@ class ControllerPlugs:
         return sorted(path[: -len("Alias")] for path, alias in values.items() if alias == name)
 
     def list(self) -> list[dict]:
-        controllers = self.lab.get(CONTROLLERS + "*.Alias")
+        """Every controller the agent knows, with the state of its connection.
+
+        kind is "tests" or "lab" for the lab's own, "plugged" for one plugged
+        in here (its connection carries the same Alias), "other" otherwise.
+        """
+        aliases = self.lab.get(CONTROLLERS + "*.Alias")
+        endpoints = self.lab.get(CONTROLLERS + "*.EndpointID")
+        enabled = self.lab.get(CONTROLLERS + "*.Enable")
+        references = self.lab.get(CONTROLLERS + "*.MTP.*.MQTT.Reference")
         clients = self.lab.get(CLIENTS, 2)
-        plugged = []
-        for path, name in sorted(controllers.items()):
-            if name in RESERVED:
-                continue
+        meta = self._meta()
+        listed = []
+        for path, name in sorted(aliases.items(), key=lambda kv: _instance(kv[0])):
             controller = path[: -len("Alias")]
-            client = next((p[: -len("Alias")] for p, a in clients.items()
-                           if p.endswith(".Alias") and a == name), None)
-            if client is None:
-                continue
-            plugged.append({
+            endpoint = endpoints.get(controller + "EndpointID", "")
+            reference = next((v for p, v in sorted(references.items()) if p.startswith(controller + "MTP.")), "")
+            client = reference + "." if reference else ""
+            plugged = bool(client) and clients.get(client + "Alias") == name and name not in RESERVED
+            entry = {
                 "name": name,
-                "endpointId": self.lab.get(controller + "EndpointID").get(controller + "EndpointID", ""),
+                "endpointId": endpoint,
+                "kind": KINDS.get(endpoint, "plugged" if plugged else "other"),
                 "controller": controller.rstrip("."),
-                "client": client.rstrip("."),
-                "broker": f"{clients.get(client + 'BrokerAddress', '')}:{clients.get(client + 'BrokerPort', '')}",
-                "enabled": clients.get(client + "Enable") == "true",
-                "status": clients.get(client + "Status", ""),
-            })
-        return plugged
+                "controllerEnabled": enabled.get(controller + "Enable") == "true",
+                "client": reference,
+                "broker": f"{clients.get(client + 'BrokerAddress', '')}:{clients.get(client + 'BrokerPort', '')}"
+                          if client else "",
+                "enabled": clients.get(client + "Enable") == "true" if client else False,
+                "status": clients.get(client + "Status", "") if client else "",
+            }
+            if plugged:
+                entry.update(ui=meta.get(name, {}).get("ui", ""),
+                             description=meta.get(name, {}).get("description", ""))
+            listed.append(entry)
+        return listed
+
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        """Connects or disconnects a plugged controller; False if none has that name."""
+        clients = self._with_alias(CLIENTS, name)
+        if name in RESERVED or not clients:
+            return False
+        self.lab.set({clients[0] + "Enable": "true" if enabled else "false"})
+        return True
 
     def plug(self, definition: Any) -> dict:
         """Creates the rows for a controller, replacing any earlier ones of that name."""
@@ -130,6 +182,7 @@ class ControllerPlugs:
             except LabControllerError:
                 pass
             raise
+        self._remember(name, {"ui": d["ui"], "description": d["description"]})
         log.info("plugged controller %s (%s) via %s", name, d["endpointId"], client)
         return next((c for c in self.list() if c["name"] == name), {"name": name})
 
@@ -143,4 +196,11 @@ class ControllerPlugs:
                 found = True
         if found:
             log.info("unplugged controller %s", name)
+        self._remember(name, None)
         return found
+
+
+def _instance(path: str) -> int:
+    """Instance number of "Device.LocalAgent.Controller.3.Alias", for ordering."""
+    part = path[len(CONTROLLERS):].split(".", 1)[0]
+    return int(part) if part.isdigit() else 0

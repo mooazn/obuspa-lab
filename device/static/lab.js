@@ -564,12 +564,98 @@ const browseView = {
   },
 };
 
+// ---------------------------------------------------------------- controllers
+
+// Every controller the agent knows. Plugged-in ones (make oktopus, or
+// POST /api/controllers) can be switched off and on, unplugged, and opened.
+const KIND_LABEL = { tests: "test suite", lab: "lab · Browse", plugged: "plugged in", other: "added over USP" };
+
+const controllersPanel = {
+  mount(section) {
+    const head = el("div", "panel-head");
+    this.pill = el("span", "pill", "controllers: …");
+    const refresh = el("button", "ghost", "Refresh");
+    refresh.onclick = () => this.load();
+    head.append(this.pill, el("span", "spacer"), refresh);
+    this.error = el("pre", "browse-error"); this.error.hidden = true;
+    this.list = el("div", "controllers");
+    this.help = el("div", "help", "Plug in another controller with make oktopus, or by POSTing a definition to " +
+      "/api/controllers (docs/vendor-integration.md, section 6). A switched-off controller keeps its rows; " +
+      "unplugging removes them.");
+    section.append(head, this.error, this.list, this.help);
+  },
+
+  onShow() {
+    this.load();
+    if (!this.timer) this.timer = setInterval(() => { if (!this.section.hidden) this.load(); }, 4000);
+  },
+
+  async load() {
+    try {
+      const res = await fetch("/api/controllers");
+      const d = await res.json();
+      if (!res.ok) throw new Error((d.detail && (d.detail.message || d.detail)) || res.statusText);
+      this.error.hidden = true;
+      this.render(d.controllers || []);
+    } catch (e) {
+      this.error.textContent = `could not list controllers: ${e.message}`; this.error.hidden = false;
+    }
+  },
+
+  render(controllers) {
+    const plugged = controllers.filter(c => c.kind === "plugged").length;
+    this.pill.textContent = `${controllers.length} controller${controllers.length === 1 ? "" : "s"} · ${plugged} plugged in`;
+    this.pill.className = "pill ok";
+    this.list.innerHTML = "";
+    for (const c of controllers) {
+      const card = el("div", "card ctl-card");
+      const head = el("div", "row-head");
+      head.append(el("span", "inst", c.name), el("span", "badge kind", KIND_LABEL[c.kind] || c.kind), el("span", "spacer"));
+      // A plugged-in controller has a connection of its own, so its state is
+      // the controller's; the lab's share the agent's link to the lab broker
+      if (c.kind === "plugged" && c.status) {
+        head.append(el("span", "badge " + (c.status === "Connected" ? "up" : "down"), c.status === "Connected" ? "connected" : c.status));
+      }
+      if (c.kind === "plugged") {
+        const sw = el("label", "switch");
+        const box = document.createElement("input"); box.type = "checkbox"; box.checked = c.enabled;
+        box.onchange = () => post(`/api/controllers/${encodeURIComponent(c.name)}/enable`, { enabled: box.checked })
+          .then(() => this.load()).catch(e => { alert(e.message); this.load(); });
+        sw.append(box, document.createTextNode("enabled"));
+        const unplug = el("button", "ghost", "Unplug");
+        unplug.onclick = () => {
+          if (!confirm(`Unplug ${c.name}? Its rows are removed from the agent.`)) return;
+          post(`/api/controllers/${encodeURIComponent(c.name)}`, undefined, "DELETE")
+            .then(() => this.load()).catch(e => alert(e.message));
+        };
+        head.append(sw, unplug);
+      }
+      if (c.ui) {
+        const open = document.createElement("a");
+        open.className = "open"; open.href = c.ui; open.target = "_blank"; open.rel = "noopener";
+        open.textContent = `Open ${c.name} ↗`;
+        head.append(open);
+      }
+      card.appendChild(head);
+      const grid = el("div", "grid");
+      grid.append(el("label", "", "endpoint"), el("span", "ro", c.endpointId));
+      grid.append(el("label", "", "controller"), el("span", "ro", c.controller));
+      if (c.client) grid.append(el("label", "", "connection"),
+        el("span", "ro", `${c.client} → ${c.broker}` + (c.kind === "plugged" || !c.status ? "" : ` · ${c.status}`)));
+      card.appendChild(grid);
+      if (c.description) card.appendChild(el("div", "desc", c.description));
+      this.list.appendChild(card);
+    }
+  },
+};
+
 // ---------------------------------------------------------------- boot
 
 export function initLab() {
   registerPanel("model",   "Data model", {});
   registerPanel("console", "Console",    consolePanel);
   registerPanel("usp",     "USP",        uspPanel);
+  registerPanel("controllers", "Controllers", controllersPanel);
   registerPanel("faults",  "Faults & clock", faultsPanel);
   registerPanel("hal",     "HAL",        halPanel);
 

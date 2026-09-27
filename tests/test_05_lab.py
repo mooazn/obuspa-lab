@@ -417,6 +417,8 @@ PLUG = {
     "endpointId": "self::test-plugged",
     "broker": {"address": "mosquitto", "port": 1885},
     "controllerTopic": "/usp/test-plugged",
+    "ui": "http://127.0.0.1:9/test-ctl",
+    "description": "a controller for the tests",
 }
 
 
@@ -454,7 +456,33 @@ def test_plugging_a_controller_creates_its_rows(controller, device_url, plugged)
     assert len(mtp) == 1 and controller.get_one(mtp[0] + "MQTT.Reference") == client
 
     listed = requests.get(f"{device_url}/api/controllers", timeout=10).json()["controllers"]
-    assert [c["name"] for c in listed if c["name"] == "test-ctl"] == ["test-ctl"]
+    mine = [c for c in listed if c["name"] == "test-ctl"]
+    assert len(mine) == 1 and mine[0]["kind"] == "plugged"
+    assert mine[0]["ui"] == PLUG["ui"] and mine[0]["description"] == PLUG["description"]
+
+
+def test_controller_list_includes_the_labs_own(device_url):
+    listed = requests.get(f"{device_url}/api/controllers", timeout=10).json()["controllers"]
+    kinds = {c["endpointId"]: c["kind"] for c in listed}
+    assert kinds["self::usp-controller"] == "tests"
+    assert kinds["self::vdev-lab"] == "lab"
+    lab = next(c for c in listed if c["kind"] == "lab")
+    assert lab["status"] == "Connected" and "ui" not in lab
+
+
+def test_switching_a_plugged_controller_off_and_on(controller, device_url, plugged):
+    entry = plugged().json()["controller"]
+    toggle = lambda name, body: requests.post(f"{device_url}/api/controllers/{name}/enable", json=body, timeout=30)
+
+    assert toggle("test-ctl", {"enabled": False}).status_code == 200
+    assert controller.get_one(entry["client"] + ".Enable") == "false"
+    assert _aliases(controller, "Device.LocalAgent.Controller."), "switching off keeps the rows"
+    assert toggle("test-ctl", {"enabled": True}).status_code == 200
+    assert controller.get_one(entry["client"] + ".Enable") == "true"
+
+    assert toggle("test-ctl", {"enabled": "yes"}).status_code == 400
+    assert toggle("no-such", {"enabled": True}).status_code == 404
+    assert toggle("lab", {"enabled": False}).status_code == 404
 
 
 def test_plugging_again_replaces_rather_than_duplicates(controller, plugged):
@@ -475,5 +503,6 @@ def test_unplugging_removes_every_row(controller, device_url, plugged):
 def test_controller_definitions_are_validated(plugged):
     for bad in ({**PLUG, "name": "Bad Name"}, {**PLUG, "name": "lab"},
                 {**PLUG, "endpointId": ""}, {**PLUG, "broker": {"address": "x"}},
-                {**PLUG, "controllerTopic": None}, "not-an-object"):
+                {**PLUG, "controllerTopic": None}, {**PLUG, "ui": "javascript:alert(1)"},
+                "not-an-object"):
         assert plugged(bad).status_code in (400, 422), bad

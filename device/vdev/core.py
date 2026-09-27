@@ -180,6 +180,10 @@ class VirtualDevice:
         self._recent_boots: Callable[[], int] = lambda: 0
 
         self.fault_state: dict[str, dict] = {}
+        # What the lab knows about controllers plugged into the agent that the
+        # agent's own rows cannot hold, such as where their web UI is.
+        # Lab state, like the faults.
+        self.controller_meta: dict[str, dict] = {}
         self.hal: dict[str, str] = {}
         self._hal_listeners = []
         self.wan = None
@@ -262,6 +266,7 @@ class VirtualDevice:
 
         self.fault_state = saved.get("faults", {})
         self.clock.load(saved.get("clock"))
+        self.controller_meta = saved.get("controllers", {})
         self.boot_count = saved.get("boot_count", 0)
         self.reboot_cause = saved.get("reboot_cause", "FactoryReset")
         self.sdcard_inserted = bool(saved.get("sdcard_inserted", False))
@@ -291,6 +296,7 @@ class VirtualDevice:
                 "sdcard_inserted": self.sdcard_inserted,
                 "faults": self.fault_state,
                 "clock": self.clock.to_json(),
+                "controllers": self.controller_meta,
             }
 
         try:

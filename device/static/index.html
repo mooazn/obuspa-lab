@@ -156,7 +156,7 @@
   }
   .notice.show { opacity: 1; }
   /* --- lab tabs --- */
-  .tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
   .tab {
     background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
     border-radius: 0; padding: 8px 12px; font-size: 13px; margin-bottom: -1px;
@@ -215,6 +215,13 @@
   .browse-form input.path { flex: none; }
   .browse-label { font-weight: 600; font-size: 13px; }
   .browse-out { white-space: pre-wrap; font-size: 13px; margin: 0; }
+  .ctl-card .row-head { gap: 10px; flex-wrap: wrap; }
+  .ctl-card .badge.kind { color: var(--muted); background: var(--bg); border: 1px solid var(--border); }
+  .ctl-card a.open { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); padding: 5px 12px;
+    border-radius: 6px; text-decoration: none; }
+  .ctl-card a.open:hover { filter: brightness(1.1); }
+  .ctl-card .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .ctl-card .desc { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
   .usp-row { border-bottom: 1px solid var(--border); }
   .usp-row.meta { opacity: 0.55; }
   .usp.notify-only .usp-row:not(.notify) { display: none; }
@@ -257,6 +264,7 @@
   </section>
   <section data-tab="console" hidden></section>
   <section data-tab="usp" hidden></section>
+  <section data-tab="controllers" hidden></section>
   <section data-tab="faults" hidden></section>
   <section data-tab="hal" hidden></section>
 

@@ -343,15 +343,22 @@ small definition, `controllers/oktopus.json` being the example:
 
 ```
 POST   /api/controllers {name, endpointId, broker: {address, port},
-                         controllerTopic, agentTopic?, role?}
-GET    /api/controllers
+                         controllerTopic, agentTopic?, role?, ui?, description?}
+GET    /api/controllers                   # every controller the agent knows
+POST   /api/controllers/<name>/enable {enabled}
 DELETE /api/controllers/<name>
 ```
 
 Every row carries the name as its `Alias`. Plugging in again replaces the
-rows, and the agent makes a fresh connection. To take a controller offline
-without removing it, set `Device.MQTT.Client.[Alias=="<name>"].Enable` to
-`false` in the Browse view.
+rows, and the agent makes a fresh connection. `enable` connects or
+disconnects a plugged controller and keeps its rows (it sets
+`Device.MQTT.Client.[Alias=="<name>"].Enable`). `ui` and `description` are
+the lab's, not the agent's: the device keeps them with its other lab state.
+
+The **Controllers** tab shows the same list: the test suite's controller,
+the lab's own, and anything plugged in, each with its connection's state. A
+plugged-in controller gets an on/off switch, Unplug, and, when its
+definition names a `ui`, a link that opens it.
 
 **The second WAN route.** The agent reaches another controller's broker
 through the device's WAN port, like its own: `mosquitto:1884` leads to
