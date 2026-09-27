@@ -1,8 +1,12 @@
 {
   "name": "oktopus",
-  "description": "Oktopus (github.com/OktopUSP/oktopus), run by `make oktopus`. Its broker joins the lab network as controller-broker; the agent reaches it through the device's second WAN route, mosquitto:1884.",
+  "description": "Open source USP controller and device management platform, run next to the lab by make oktopus. Reached through the device's WAN port.",
   "endpointId": "oktopusController",
-  "broker": {"address": "mosquitto", "port": 1884},
+  "broker": {
+    "address": "mosquitto",
+    "port": 1884
+  },
   "controllerTopic": "oktopus/usp/v1/controller",
-  "role": "Device.LocalAgent.ControllerTrust.Role.1"
+  "role": "Device.LocalAgent.ControllerTrust.Role.1",
+  "ui": "http://127.0.0.1:8090"
 }

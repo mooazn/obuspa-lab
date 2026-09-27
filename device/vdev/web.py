@@ -423,7 +423,7 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None, lab=Non
     @app.get("/api/controllers")
     async def list_controllers() -> dict:
         from .controllers import ControllerPlugs
-        return {"controllers": await lab_call_with(ControllerPlugs(lab).list) if lab else []}
+        return {"controllers": await lab_call_with(ControllerPlugs(lab, device).list) if lab else []}
 
     @app.post("/api/controllers")
     async def plug_controller(body: dict) -> dict:
@@ -432,12 +432,22 @@ def create_app(device: VirtualDevice, shim=None, console=None, tap=None, lab=Non
             validate(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"controller": await lab_call_with(ControllerPlugs(lab).plug, body)}
+        return {"controller": await lab_call_with(ControllerPlugs(lab, device).plug, body)}
 
     @app.delete("/api/controllers/{name}")
     async def unplug_controller(name: str) -> dict:
         from .controllers import ControllerPlugs
-        if not await lab_call_with(ControllerPlugs(lab).unplug, name):
+        if not await lab_call_with(ControllerPlugs(lab, device).unplug, name):
+            raise HTTPException(status_code=404, detail=f"no controller plugged in as {name}")
+        return {"ok": True}
+
+    @app.post("/api/controllers/{name}/enable")
+    async def enable_controller(name: str, body: dict) -> dict:
+        """{enabled}: connects or disconnects a plugged controller, keeping its rows."""
+        from .controllers import ControllerPlugs
+        if type(body.get("enabled")) is not bool:
+            raise HTTPException(status_code=400, detail="enabled must be true or false")
+        if not await lab_call_with(ControllerPlugs(lab, device).set_enabled, name, body["enabled"]):
             raise HTTPException(status_code=404, detail=f"no controller plugged in as {name}")
         return {"ok": True}
 

@@ -1,6 +1,6 @@
 # obuspa-lab
 
-![Lab Setup](<LabInitImg.png>)
+![The lab: a 3D gateway booted with two vendor plug-ins from its SD card, and the lab's tabs](docs/images/lab.png)
 
 A virtual CPE for TR-369 / USP development. A real, unmodified
 [OB-USP-AGENT](https://github.com/BroadbandForum/obuspa) runs against
@@ -80,10 +80,14 @@ ahead for the device and the firmware alike.
 
 ![The Faults and clock tab with a latency fault and a clock jump](docs/images/faults-clock.png)
 
-**Oktopus** — the lab device in a real controller's inventory, after
-`make oktopus`.
+**[Oktopus](https://github.com/OktopUSP/oktopus)** — the lab device in a
+real controller's inventory, after `make oktopus`. The lab's **Controllers**
+tab lists every controller the agent knows, switches a plugged-in one on and
+off, and opens its UI.
 
 ![Oktopus listing the lab device as online](docs/images/oktopus.png)
+
+![The Controllers tab: the test suite's, the lab's and Oktopus, with a link to open it](docs/images/controllers.png)
 
 ## Quick start
 
