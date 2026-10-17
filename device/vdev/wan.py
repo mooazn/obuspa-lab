@@ -65,10 +65,15 @@ class WanRelay:
             faults = self.device.fault_state
             if "wan_down" in faults:
                 reasons.append("wan_down")
-            if self.device.safe_get("Device.IP.Interface.1.Status") != "Up":
-                reasons.append("IP interface down")
-            if not self.device.safe_get("Device.Ethernet.Interface.1.Enable"):
-                reasons.append("Ethernet interface disabled")
+            # The board's WAN interface (its profile names it) and the port
+            # beneath it; a board without one has no link to lose
+            wan = self.device.profile.wan
+            if wan:
+                if self.device.safe_get(f"{wan}.Status") != "Up":
+                    reasons.append("IP interface down")
+                port = self.device.safe_get(f"{wan}.LowerLayers") or ""
+                if port.startswith("Device.Ethernet.") and not self.device.safe_get(f"{port}.Enable"):
+                    reasons.append("Ethernet interface disabled")
             latency = faults.get("wan_latency", {}).get("params", {}).get("ms", 0)
         return reasons, latency
 

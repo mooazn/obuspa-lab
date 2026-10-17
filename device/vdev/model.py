@@ -1,9 +1,11 @@
-"""Declarative description of the simulated device's data model.
+"""Every TR-181 object the lab can simulate, and how each one behaves.
 
-This module is the single source of truth for what the device exposes and how
-it behaves. The C plug-in asks for it at startup and registers whatever it
-finds here, so growing the data model is a pure-Python change - no recompiling,
-no touching obuspa.
+This is the library a device profile (profile.py, device/profiles/*.toml)
+draws on: a profile says which areas a board has and which instances exist at
+factory reset; the objects, parameters, derivations and commands come from
+here. The C plug-in asks the device for its model at startup and registers
+whatever it finds, so growing the library is a pure-Python change - no
+recompiling, no touching obuspa.
 
 Object paths may contain several instance placeholders, e.g.
 Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}. Objects must be listed
@@ -459,57 +461,6 @@ MODEL: list[ObjectDef] = [
 ]
 
 
-#: Instances present at factory reset, keyed by schema path. Nested objects use
-#: a tuple of the parent instance numbers.
-FACTORY_INSTANCES: dict[str, list[tuple[tuple[int, ...], dict[str, Any]]]] = {
-    "Device.Ethernet.Interface.{i}": [
-        ((1,), {"Name": "eth0", "MACAddress": "02:00:5e:00:00:01"}),
-        ((2,), {"Name": "eth1", "MACAddress": "02:00:5e:00:00:02"}),
-    ],
-    "Device.IP.Interface.{i}": [
-        ((1,), {"Name": "wan", "LowerLayers": "Device.Ethernet.Interface.1"}),
-        ((2,), {"Name": "lan", "LowerLayers": "Device.Ethernet.Interface.2"}),
-    ],
-    "Device.IP.Interface.{i}.IPv4Address.{i}": [
-        ((1, 1), {"IPAddress": "100.64.1.23", "SubnetMask": "255.255.255.0",
-                  "AddressingType": "DHCP"}),
-        ((2, 1), {"IPAddress": "192.168.1.1", "SubnetMask": "255.255.255.0",
-                  "AddressingType": "Static"}),
-    ],
-    "Device.WiFi.Radio.{i}": [
-        ((1,), {"Name": "wl0", "OperatingFrequencyBand": "2.4GHz",
-                "SupportedFrequencyBands": "2.4GHz", "Channel": 6,
-                "OperatingChannelBandwidth": "20MHz", "Noise": -92}),
-        ((2,), {"Name": "wl1", "OperatingFrequencyBand": "5GHz",
-                "SupportedFrequencyBands": "5GHz", "Channel": 36,
-                "OperatingChannelBandwidth": "80MHz", "Noise": -96}),
-    ],
-    "Device.WiFi.SSID.{i}": [
-        ((1,), {"Name": "wl0", "SSID": "VirtualGateway-001",
-                "BSSID": "02:00:5e:00:00:10",
-                "LowerLayers": "Device.WiFi.Radio.1"}),
-        ((2,), {"Name": "wl1", "SSID": "VirtualGateway-001-5G",
-                "BSSID": "02:00:5e:00:00:11",
-                "LowerLayers": "Device.WiFi.Radio.2"}),
-    ],
-    "Device.WiFi.AccessPoint.{i}": [
-        ((1,), {"SSIDReference": "Device.WiFi.SSID.1"}),
-        ((2,), {"SSIDReference": "Device.WiFi.SSID.2"}),
-    ],
-    "Device.Firewall.Chain.{i}": [
-        ((1,), {"Name": "LAN", "Enable": True}),
-    ],
-    "Device.Cellular.Interface.{i}": [
-        ((1,), {"Name": "wwan0", "IMEI": "356938035643809"}),
-    ],
-    "Device.Hosts.Host.{i}": [
-        ((1,), {"PhysAddress": "02:00:5e:00:aa:01", "IPAddress": "192.168.1.10",
-                "HostName": "wired-desktop", "InterfaceType": "Ethernet",
-                "Layer1Interface": "Device.Ethernet.Interface.2"}),
-    ],
-}
-
-
 # ----------------------------------------------------------------------
 # Clients coming and going
 # ----------------------------------------------------------------------
@@ -523,6 +474,8 @@ def attach_client(device, access_point: int, mac: str, hostname: str,
     is what a real gateway does, and signals both to the agent so a subscribed
     controller sees the ObjectCreation.
     """
+    if not device.has_object("Device.WiFi.AccessPoint.{i}"):
+        raise _board_lacks("Wi-Fi access points")
     ap_path = f"Device.WiFi.AccessPoint.{access_point}"
     reference = device.safe_get(f"{ap_path}.SSIDReference") or ""
 
@@ -568,6 +521,7 @@ def insert_sim(device, iccid: str = "8944500000000000001",
                imsi: str = "234500000000001", carrier: str = "VirtualCell",
                apn: str = "internet") -> None:
     """Seats a SIM: the USIM becomes valid, the modem registers, an APN appears."""
+    _require_modem(device)
     device.set_many(
         {
             "Device.Cellular.Interface.1.USIM.Status": "Valid",
@@ -593,6 +547,7 @@ def insert_sim(device, iccid: str = "8944500000000000001",
 
 def eject_sim(device) -> None:
     """Pulls the SIM: the modem drops off the network and the APN goes with it."""
+    _require_modem(device)
     device.set_many(
         {
             "Device.Cellular.Interface.1.USIM.Status": "None",
@@ -613,12 +568,30 @@ def sim_inserted(device) -> bool:
     return device.safe_get("Device.Cellular.Interface.1.USIM.Status") == "Valid"
 
 
+def _require_modem(device) -> None:
+    if not device.has_object("Device.Cellular.Interface.{i}"):
+        raise _board_lacks("cellular modem or SIM slot")
+
+
+def _board_lacks(part: str) -> Exception:
+    """The error for an action on a part the board's profile does not have."""
+    from .core import DeviceError      # core imports this module at load time
+    return DeviceError(f"this board has no {part}")
+
+
 def _next_lan_address(device) -> str:
-    """Picks the next free address in the LAN pool."""
+    """Picks the next free address in the LAN's /24, from .20 up.
+
+    The LAN is the interface the board's profile names; its first IPv4
+    address gives the subnet.
+    """
+    lan = device.profile.lan if device.profile else None
+    gateway = (device.safe_get(f"{lan}.IPv4Address.1.IPAddress") if lan else None) or "192.168.1.1"
+    prefix = gateway.rsplit(".", 1)[0] + "."
     taken = set()
     for host in device.child_instances("Device.Hosts.Host.{i}", ()):
         address = device.safe_get(f"Device.Hosts.Host.{host}.IPAddress") or ""
-        if address.startswith("192.168.1."):
+        if address.startswith(prefix):
             try:
                 taken.add(int(address.rsplit(".", 1)[1]))
             except ValueError:
@@ -626,8 +599,8 @@ def _next_lan_address(device) -> str:
 
     for candidate in range(20, 255):
         if candidate not in taken:
-            return f"192.168.1.{candidate}"
-    return "192.168.1.254"
+            return f"{prefix}{candidate}"
+    return f"{prefix}254"
 
 
 # ----------------------------------------------------------------------
@@ -638,10 +611,11 @@ def _next_lan_address(device) -> str:
 def _cmd_ssid_reset(device, inputs: dict) -> dict:
     """Device.WiFi.SSID.{i}.Reset() - back to the factory SSID."""
     instance = inputs["__instances__"][0]
-    factory = dict(FACTORY_INSTANCES["Device.WiFi.SSID.{i}"][instance - 1][1])
+    factory = device.profile.factory_row("Device.WiFi.SSID.{i}", (instance,)) or {}
+    ssid = device.object_def("Device.WiFi.SSID.{i}").param("SSID")
     device.set_many(
         {
-            f"Device.WiFi.SSID.{instance}.SSID": factory["SSID"],
+            f"Device.WiFi.SSID.{instance}.SSID": factory.get("SSID", ssid.default),
             f"Device.WiFi.SSID.{instance}.Enable": True,
         }
     )

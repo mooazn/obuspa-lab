@@ -580,7 +580,7 @@ const controllersPanel = {
     this.error = el("pre", "browse-error"); this.error.hidden = true;
     this.list = el("div", "controllers");
     this.help = el("div", "help", "Plug in another controller with make oktopus, or by POSTing a definition to " +
-      "/api/controllers (docs/vendor-integration.md, section 6). A switched-off controller keeps its rows; " +
+      "/api/controllers (docs/vendor-integration.md, \"Bringing your own controller\"). A switched-off controller keeps its rows; " +
       "unplugging removes them.");
     section.append(head, this.error, this.list, this.help);
   },

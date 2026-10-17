@@ -44,13 +44,13 @@ A plug-in directory is one of:
   is a good template.
 - **A directory of `.c` files, no Makefile.** Everything is compiled into one
   `.so` with `-fPIC -DENABLE_UDS -I<tree>/src/{include,vendor,core}` and
-  `-lpthread`, plus the vhal client (see §4).
+  `-lpthread`, plus the vhal client (see §5).
 
 The directory's name becomes the plug-in's name. Plug-ins are compiled inside
 the platform's build container, **against the obuspa tree the card will
 boot** — the built-in one, or the one you flashed with `SRC`/`REF`. That is
 deliberate: obuspa's vendor API moves between releases, and this catches it
-before it reaches a device (see §7, logging).
+before it reaches a device (see §8, logging).
 
 ### As a whole tree
 
@@ -85,7 +85,82 @@ firmware update would on hardware.
 
 ---
 
-## 2. The plug-in contract
+## 2. Describing your board
+
+The lab simulates whichever board a **profile** describes: a TOML file in
+`device/profiles/`. `reference-gateway` (a dual-band Wi-Fi gateway with a
+cellular modem) is the default; `wired-router` (Ethernet only, four LAN
+ports) is a second example. Choose one when starting the lab:
+
+```
+make dev VDEV_PROFILE=wired-router       # or set VDEV_PROFILE for make up
+```
+
+A profile lists the instances the board has at factory reset, in TR-181's
+own object and parameter names:
+
+```toml
+[board]
+name = "my-gateway"
+description = "Single-band Wi-Fi gateway with an Ethernet WAN"
+wan = "Device.IP.Interface.1"            # the interface the WAN port follows
+
+[[Ethernet.Interface]]                   # Device.Ethernet.Interface.1
+Name = "eth0"
+MACAddress = "02:00:5e:00:00:01"
+
+[[IP.Interface]]                         # Device.IP.Interface.1
+Name = "wan"
+LowerLayers = "Device.Ethernet.Interface.1"
+  [[IP.Interface.IPv4Address]]           # Device.IP.Interface.1.IPv4Address.1
+  IPAddress = "100.64.1.23"
+  AddressingType = "DHCP"
+
+[[WiFi.Radio]]                           # Device.WiFi.Radio.1
+Name = "wl0"
+OperatingFrequencyBand = "2.4GHz"
+Channel = 11
+
+[[WiFi.SSID]]
+SSID = "MyGateway"
+LowerLayers = "Device.WiFi.Radio.1"
+
+[[WiFi.AccessPoint]]
+SSIDReference = "Device.WiFi.SSID.1"
+Security.ModeEnabled = "WPA3-Personal"   # dotted parameter names work as written
+```
+
+- **Instances.** Each `[[Area.Object]]` table is one instance, numbered in
+  order from 1. A nested `[[Area.Object.Child]]` table is a child of the
+  instance above it.
+- **Parts.** The areas a profile names (`WiFi`, `Cellular`, `Firewall`, ...)
+  are the parts the board has. Their objects, behaviour and commands come
+  from the lab; areas left out do not exist. On `wired-router` there is no
+  `Device.WiFi` in the agent's schema at all, and the lab's SIM and Wi-Fi
+  controls report that the board has none. An empty table (`[Hosts]`)
+  declares an area with no factory instances.
+- **Values.** Parameters left out take the lab's defaults. Values are
+  checked against each parameter's type and rules; computed parameters
+  (`Status`, the `...NumberOfEntries` counts) cannot be set; a reference
+  such as `LowerLayers` must name an instance the profile defines. A
+  mistake stops the device with a message naming the file, the instance and
+  the parameter.
+- **Your own board.** Add a file to `device/profiles/` and select it by
+  name. The folder is mounted into the device, so no image rebuild is
+  needed. Only objects the lab simulates can appear (see
+  `device/vdev/model.py`); a new kind of object means adding it there.
+- **Switching.** On a profile change the device starts from the new board's
+  factory state: configuration saved under another profile is not carried
+  across. Lab state (faults, the clock, the cards in their slots) is kept.
+  The agent registers the new data model as it reboots.
+- **Not described by the profile yet:** the board's identity
+  (`Device.DeviceInfo.Manufacturer`, `ModelName`, from the agent's factory
+  file), and the 3D view. The Device tab leaves out cards for parts the
+  board lacks, but otherwise shows the reference board's layout.
+
+---
+
+## 3. The plug-in contract
 
 What obuspa expects of a plug-in, and what this platform adds.
 
@@ -122,7 +197,7 @@ exits immediately - a crash loop, flagged in the Console tab and on the boot
 tag, with that line showing on every pass. Swallow it and the agent comes up
 with your registration silently missing, which is harder to notice; prefer
 the loud failure. Either way the fix is the same: keep to a vendor prefix,
-and act on the standard subtrees through the data model (§3).
+and act on the standard subtrees through the data model (§4).
 
 **`VENDOR_Stop` never runs.** A simulated reboot is a power cycle — the agent
 is `_exit()`ed, not shut down — exactly as firmware loses power. Do not rely
@@ -147,7 +222,7 @@ runs again. State you did not persist is gone — same as hardware.
 
 ---
 
-## 3. Acting on the hardware
+## 4. Acting on the hardware
 
 Vendor logic changes things: it blocks a client, brings an interface down,
 rewrites a firewall. On a real device that logic reaches the hardware through
@@ -194,7 +269,7 @@ derives the effect.
 
 `examples/parental-controls/` uses every path above.
 
-## 4. Stimulating your code
+## 5. Stimulating your code
 
 ### Through the environment (no changes to your code)
 
@@ -256,7 +331,7 @@ Children that go straight to `exec`, as obuspa's own do, are unaffected.
 ### Through the virtual HAL (opt-in)
 
 The HAL is the escape hatch for what the data model does not cover: reading
-hardware the model does not represent, and creating or deleting rows (§3).
+hardware the model does not represent, and creating or deleting rows (§4).
 Code that reads a temperature sensor, a modem's RSSI, a chipset SDK — things
 a container does not have — has nothing to read here. If that code sits
 behind a HAL of your own (`hal_get_temp()`, one backend per board), write a
@@ -289,7 +364,7 @@ threshold as if it came from a board's EEPROM.
 
 ---
 
-## 5. Observing what it did
+## 6. Observing what it did
 
 - **USP tab** / `GET /api/usp/timeline` / `WS /ws/usp` — every record between
   agent and controller, decoded: direction, message type, a one-line summary,
@@ -315,7 +390,7 @@ threshold as if it came from a board's EEPROM.
 
 ---
 
-## 6. Bringing your own controller
+## 7. Bringing your own controller
 
 The lab's own controllers are test tools. To see your work through a real
 controller - the one your operator runs, or an open source one - plug it
@@ -388,7 +463,7 @@ definition for it; a broker reachable some other way needs only the right
 
 ---
 
-## 7. Things that bite
+## 8. Things that bite
 
 **Logging.** Use `USP_LOG_Printf(kLogLevel_Info, kLogType_Debug, fmt, …)`.
 The convenience macros `USP_LOG_Error/Warning/Info` are **not stable across
@@ -402,7 +477,7 @@ pipe; prefer `USP_LOG_Printf` or stderr.
 unless the plug-in is compiled with the same feature defines as obuspa. The
 bare-`.c` build sets it; a Makefile must too.
 
-**Crash loop.** See §2. Eject the card (SD slot in the 3D view or
+**Crash loop.** See §3. Eject the card (SD slot in the 3D view or
 `POST /api/sdcard {"action":"eject"}`) and press reset to get back to the
 built-in image; the console tells you what failed.
 
@@ -444,7 +519,7 @@ change to its factory configuration.
 
 ---
 
-## 8. Worked examples
+## 9. Worked examples
 
 `examples/disk-monitor/` — a vendor object with a live getter, a persisted
 controller-writable threshold, a background thread doing `statvfs()`, a

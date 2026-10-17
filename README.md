@@ -26,6 +26,11 @@ not need a board, a card reader, or a power strip.
   radios, SSIDs, access points and their clients, Hosts, IP, Ethernet, a
   firewall, Cellular with a removable SIM. Disabling a radio takes its SSIDs down and
   drops its clients; the other radio carries on. Sync and async commands.
+- **Your board, described in a file.** A profile lists a board's parts and
+  factory instances in TR-181 names (`device/profiles/*.toml`), and the lab
+  becomes that board: `make dev VDEV_PROFILE=wired-router` runs a wired
+  router with four LAN ports and no Wi-Fi or modem. See
+  [Describing your board](docs/vendor-integration.md#2-describing-your-board).
 - **A device you can handle.** A 3D gateway with LEDs that follow state, a
   reset button (press: reboot; hold: factory reset), a SIM slot, and an SD
   card slot. The Device tab lays the box out as on a bench: power, ports,
@@ -249,7 +254,8 @@ agent/        obuspa + plug-in image, the bootloader-like entrypoint, the
               factory reset config, and Dockerfile.flash for the SD card
 sdcard/       the SD card: `make flash` writes obuspa + plug-in + manifest here
 plugin/       the C shim: grouped vendor hooks -> Unix socket JSON
-device/       the virtual device: model, state, faults, WAN relay, web UI, 3D scene
+device/       the virtual device: model, state, faults, WAN relay, web UI, 3D scene;
+              profiles/ holds the boards it can be
 examples/     disk-monitor, parental-controls: worked vendor plug-ins
 docs/         vendor-integration.md — the contract for bringing your own code
 controller/   USP controller and the BBF protobuf schemas

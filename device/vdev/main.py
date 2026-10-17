@@ -10,6 +10,7 @@ import uvicorn
 
 from .console import ConsoleTail
 from .core import VirtualDevice
+from .profile import load as load_profile
 from .labctl import REPLY_TOPIC as LAB_REPLY_TOPIC, LabController
 from .shim import ShimServer
 from .usptap import UspTap
@@ -32,8 +33,13 @@ async def main() -> None:
     reboot_seconds = float(os.environ.get("VDEV_REBOOT_SECONDS", "5"))
     sdcard_dir = os.environ.get("VDEV_SDCARD_DIR", "/sdcard")
 
+    # The board: a profile name from device/profiles, or a path to a profile file
+    profile = load_profile(os.environ.get("VDEV_PROFILE") or None)
+    logging.getLogger(__name__).info("board profile %s (%s)", profile.name, profile.source)
+
     device = VirtualDevice(
-        state_file=state_file, reboot_seconds=reboot_seconds, sdcard_dir=sdcard_dir
+        profile=profile, state_file=state_file, reboot_seconds=reboot_seconds,
+        sdcard_dir=sdcard_dir,
     )
 
     shim = ShimServer(device, socket_path)

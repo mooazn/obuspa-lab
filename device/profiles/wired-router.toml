@@ -1,0 +1,77 @@
+# A wired-only router: an Ethernet WAN port and four LAN ports, with a
+# firewall and a host table, and no Wi-Fi or cellular.
+#
+# Areas a profile leaves out are parts the board does not have: this board
+# has no Device.WiFi or Device.Cellular objects, and the lab's Wi-Fi and SIM
+# controls report that. See docs/vendor-integration.md, "Describing your
+# board".
+
+[board]
+name = "wired-router"
+description = "Wired router: Ethernet WAN, four LAN ports, firewall; no Wi-Fi, no cellular"
+wan = "Device.IP.Interface.1"
+lan = "Device.IP.Interface.2"
+
+# -- Ethernet ---------------------------------------------------------------
+
+[[Ethernet.Interface]]
+Name = "wan0"
+MACAddress = "02:00:5e:10:00:01"
+
+[[Ethernet.Interface]]
+Name = "lan1"
+MACAddress = "02:00:5e:10:00:02"
+
+[[Ethernet.Interface]]
+Name = "lan2"
+MACAddress = "02:00:5e:10:00:03"
+
+[[Ethernet.Interface]]
+Name = "lan3"
+MACAddress = "02:00:5e:10:00:04"
+
+[[Ethernet.Interface]]
+Name = "lan4"
+MACAddress = "02:00:5e:10:00:05"
+
+# -- IP ---------------------------------------------------------------------
+
+[[IP.Interface]]
+Name = "wan"
+LowerLayers = "Device.Ethernet.Interface.1"
+
+  [[IP.Interface.IPv4Address]]
+  IPAddress = "100.64.7.2"
+  SubnetMask = "255.255.255.0"
+  AddressingType = "DHCP"
+
+[[IP.Interface]]
+Name = "lan"
+LowerLayers = "Device.Ethernet.Interface.2"
+
+  [[IP.Interface.IPv4Address]]
+  IPAddress = "10.0.0.1"
+  SubnetMask = "255.255.255.0"
+  AddressingType = "Static"
+
+# -- Hosts ------------------------------------------------------------------
+
+[[Hosts.Host]]
+PhysAddress = "02:00:5e:10:aa:01"
+IPAddress = "10.0.0.10"
+HostName = "nas"
+InterfaceType = "Ethernet"
+Layer1Interface = "Device.Ethernet.Interface.3"
+
+[[Hosts.Host]]
+PhysAddress = "02:00:5e:10:aa:02"
+IPAddress = "10.0.0.11"
+HostName = "desktop"
+InterfaceType = "Ethernet"
+Layer1Interface = "Device.Ethernet.Interface.4"
+
+# -- Firewall ---------------------------------------------------------------
+
+[[Firewall.Chain]]
+Name = "LAN"
+Enable = true

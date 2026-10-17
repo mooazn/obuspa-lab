@@ -40,6 +40,10 @@ proto: $(VENV)/bin/activate
 VDEV_HTTP_HOST_PORT ?= 8080
 export VDEV_HTTP_HOST_PORT
 
+# The board the device simulates: make dev VDEV_PROFILE=wired-router
+VDEV_PROFILE ?= reference-gateway
+export VDEV_PROFILE
+
 # `up` pulls the published images; `dev` builds them from this tree. Both use
 # the same compose project, so down/logs/reset apply to either.
 COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml

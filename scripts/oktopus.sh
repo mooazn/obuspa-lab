@@ -40,6 +40,29 @@ fetch() {
     git -C "$DIR" checkout --quiet --force FETCH_HEAD
 }
 
+# Oktopus's repository ships development TLS certificates for NATS, and they
+# expire (the pinned commit's cert.pem on 2026-10-06), after which every
+# service fails its TLS handshake. Replaces them with a fresh local CA and
+# certificate for the same names when they are expired or within 30 days of
+# it. Returns 0 when it generated new ones.
+renew_certs() {
+    local dir="$DIR/deploy/compose/nats_config" tmp
+    if openssl x509 -checkend $((30 * 24 * 3600)) -noout -in "$dir/cert.pem" >/dev/null 2>&1; then
+        return 1
+    fi
+    echo "oktopus: NATS certificate expired or expiring - generating a local one"
+    tmp="$(mktemp -d)"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=obuspa-lab Oktopus CA" \
+        -keyout "$tmp/ca.key" -out "$dir/rootCA.pem" 2>/dev/null
+    openssl req -newkey rsa:2048 -nodes -subj "/CN=msg_broker" \
+        -keyout "$dir/key.pem" -out "$tmp/cert.csr" 2>/dev/null
+    printf 'subjectAltName=DNS:msg_broker,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth,clientAuth\n' > "$tmp/ext"
+    openssl x509 -req -in "$tmp/cert.csr" -CA "$dir/rootCA.pem" -CAkey "$tmp/ca.key" \
+        -set_serial "0x$(openssl rand -hex 8)" -days 825 -extfile "$tmp/ext" -out "$dir/cert.pem" 2>/dev/null
+    rm -rf "$tmp"
+    return 0
+}
+
 # Oktopus learns of a device once, when its broker sees the agent subscribe;
 # an agent that connects before Oktopus's adapters are listening is never
 # listed. So plugging in waits for them. The log lines are those of the
@@ -69,7 +92,11 @@ up() {
         exit 1
     fi
     fetch
-    compose up -d
+    if renew_certs; then
+        compose up -d --force-recreate      # every service reads the certificates at start
+    else
+        compose up -d
+    fi
     echo "oktopus: waiting for it to be ready"
     wait_ready
     # Plugging in replaces any earlier rows, so the agent always makes a fresh

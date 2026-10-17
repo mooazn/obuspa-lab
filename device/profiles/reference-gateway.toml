@@ -1,0 +1,102 @@
+# The lab's reference board: a dual-band Wi-Fi gateway with an Ethernet WAN,
+# one LAN port and a cellular modem with a SIM slot.
+#
+# A profile lists the instances a board has at factory reset, in TR-181's own
+# object and parameter names. Each [[Area.Object]] table is one instance,
+# numbered in order from 1; nested tables are child instances. The areas a
+# profile mentions are the parts the board has: their behaviour comes from
+# the lab, and parameters left out take the lab's defaults. See
+# docs/vendor-integration.md, "Describing your board".
+
+[board]
+name = "reference-gateway"
+description = "Dual-band Wi-Fi gateway: Ethernet WAN, one LAN port, cellular modem with a SIM slot"
+wan = "Device.IP.Interface.1"       # the interface the WAN port follows
+lan = "Device.IP.Interface.2"       # new clients get addresses from its subnet
+
+# -- Ethernet ---------------------------------------------------------------
+
+[[Ethernet.Interface]]
+Name = "eth0"
+MACAddress = "02:00:5e:00:00:01"
+
+[[Ethernet.Interface]]
+Name = "eth1"
+MACAddress = "02:00:5e:00:00:02"
+
+# -- IP ---------------------------------------------------------------------
+
+[[IP.Interface]]
+Name = "wan"
+LowerLayers = "Device.Ethernet.Interface.1"
+
+  [[IP.Interface.IPv4Address]]
+  IPAddress = "100.64.1.23"
+  SubnetMask = "255.255.255.0"
+  AddressingType = "DHCP"
+
+[[IP.Interface]]
+Name = "lan"
+LowerLayers = "Device.Ethernet.Interface.2"
+
+  [[IP.Interface.IPv4Address]]
+  IPAddress = "192.168.1.1"
+  SubnetMask = "255.255.255.0"
+  AddressingType = "Static"
+
+# -- Wi-Fi ------------------------------------------------------------------
+
+[[WiFi.Radio]]
+Name = "wl0"
+OperatingFrequencyBand = "2.4GHz"
+SupportedFrequencyBands = "2.4GHz"
+Channel = 6
+OperatingChannelBandwidth = "20MHz"
+Noise = -92
+
+[[WiFi.Radio]]
+Name = "wl1"
+OperatingFrequencyBand = "5GHz"
+SupportedFrequencyBands = "5GHz"
+Channel = 36
+OperatingChannelBandwidth = "80MHz"
+Noise = -96
+
+[[WiFi.SSID]]
+Name = "wl0"
+SSID = "VirtualGateway-001"
+BSSID = "02:00:5e:00:00:10"
+LowerLayers = "Device.WiFi.Radio.1"
+
+[[WiFi.SSID]]
+Name = "wl1"
+SSID = "VirtualGateway-001-5G"
+BSSID = "02:00:5e:00:00:11"
+LowerLayers = "Device.WiFi.Radio.2"
+
+[[WiFi.AccessPoint]]
+SSIDReference = "Device.WiFi.SSID.1"
+
+[[WiFi.AccessPoint]]
+SSIDReference = "Device.WiFi.SSID.2"
+
+# -- Hosts ------------------------------------------------------------------
+
+[[Hosts.Host]]
+PhysAddress = "02:00:5e:00:aa:01"
+IPAddress = "192.168.1.10"
+HostName = "wired-desktop"
+InterfaceType = "Ethernet"
+Layer1Interface = "Device.Ethernet.Interface.2"
+
+# -- Firewall ---------------------------------------------------------------
+
+[[Firewall.Chain]]
+Name = "LAN"
+Enable = true
+
+# -- Cellular ---------------------------------------------------------------
+
+[[Cellular.Interface]]
+Name = "wwan0"
+IMEI = "356938035643809"

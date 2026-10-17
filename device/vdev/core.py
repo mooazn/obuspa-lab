@@ -35,14 +35,11 @@ from typing import Any, Callable, Optional
 
 from .labclock import LabClock
 from .model import (
-    COMMANDS,
-    EVENTS,
-    FACTORY_INSTANCES,
-    MODEL,
     CommandDef,
     ObjectDef,
     ParamDef,
 )
+from .profile import Profile, load as load_profile
 
 log = logging.getLogger(__name__)
 
@@ -119,14 +116,17 @@ class VirtualDevice:
 
     def __init__(
         self,
-        model: Optional[list[ObjectDef]] = None,
+        profile: Optional[Profile] = None,
         state_file: Optional[str] = None,
         reboot_seconds: float = 5.0,
         sdcard_dir: Optional[str] = None,
     ):
-        self._model = model if model is not None else MODEL
-        self._commands = COMMANDS
-        self._events = EVENTS
+        # The board: which objects exist, their commands, and the instances
+        # present at factory reset
+        self.profile = profile if profile is not None else load_profile()
+        self._model = self.profile.objects
+        self._commands = self.profile.commands
+        self._events = self.profile.events
         self._lock = threading.RLock()
         self._listeners: list[Callable[[], None]] = []
         self._event_listeners: list[Callable[[dict], None]] = []
@@ -211,6 +211,13 @@ class VirtualDevice:
     def events(self) -> list:
         return self._events
 
+    def has_object(self, schema_path: str) -> bool:
+        """Whether this board has the object, e.g. "Device.WiFi.Radio.{i}"."""
+        return self._object_by_schema(schema_path) is not None
+
+    def object_def(self, schema_path: str) -> Optional[ObjectDef]:
+        return self._object_by_schema(schema_path)
+
     def _object_by_schema(self, schema_path: str) -> Optional[ObjectDef]:
         for obj in self._model:
             if obj.path == schema_path:
@@ -221,7 +228,7 @@ class VirtualDevice:
         return {p.name: p.default for p in obj.params if p.derived is None}
 
     def _load_factory_defaults(self) -> None:
-        for schema_path, rows in FACTORY_INSTANCES.items():
+        for schema_path, rows in self.profile.factory.items():
             obj = self._object_by_schema(schema_path)
             if obj is None:
                 continue
@@ -246,7 +253,13 @@ class VirtualDevice:
                         self.state_file, exc)
             return
 
-        for schema_path, rows in saved.get("objects", {}).items():
+        # Rows saved under another board do not fit this one: start from this
+        # profile's factory state, keeping the lab state below
+        saved_profile = saved.get("profile", self.profile.name)
+        if saved_profile != self.profile.name:
+            log.info("state file is for profile %r, this device is %r: starting from factory state",
+                     saved_profile, self.profile.name)
+        for schema_path, rows in (saved.get("objects", {}) if saved_profile == self.profile.name else {}).items():
             obj = self._object_by_schema(schema_path)
             # Rows made only of runtime state (associated clients, the hosts
             # seen through them) are not restored, as on a reboot: they would
@@ -298,6 +311,7 @@ class VirtualDevice:
                 "boot_count": self.boot_count,
                 "reboot_cause": self.reboot_cause,
                 "sdcard_inserted": self.sdcard_inserted,
+                "profile": self.profile.name,
                 "faults": self.fault_state,
                 "clock": self.clock.to_json(),
                 "controllers": self.controller_meta,
@@ -601,6 +615,7 @@ class VirtualDevice:
                         "manifest": self.sdcard_manifest(),
                     },
                     "bootedFrom": self.booted_from(),
+                    "profile": self.profile.summary(),
                     "faults": self.faults.list_faults(),
                     "clock": self.clock.snapshot(),
                     "hal": dict(self.hal),
@@ -1006,7 +1021,7 @@ class VirtualDevice:
                     # is rediscovered though, the way a gateway repopulates its
                     # host table from the wired devices still plugged into it.
                     self._state[obj.path].clear()
-                    for instances, row in FACTORY_INSTANCES.get(obj.path, []):
+                    for instances, row in self.profile.factory.get(obj.path, []):
                         values = self._defaults_for(obj)
                         values.update({k: v for k, v in row.items() if k in values})
                         self._state[obj.path][tuple(instances)] = values

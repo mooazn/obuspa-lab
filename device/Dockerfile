@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY device/vdev/ ./vdev/
 COPY device/static/ ./static/
+COPY device/profiles/ ./profiles/
 COPY --from=proto /out/*_pb2.py ./vdev/usp_proto/
 # The controller library the tests use, for the lab's own controller
 COPY controller/uspctl/__init__.py controller/uspctl/client.py ./uspctl/
